@@ -179,4 +179,4 @@ const runPlatformInitialization = async () => {
   }
 };
 
-runPlatformInitialization();
+// runPlatformInitialization(); // DISABLED: arc-commerce bootstrap fails with PGRST125; Storehouse uses its own init
