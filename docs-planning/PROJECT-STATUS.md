@@ -1,9 +1,10 @@
 # Storehouse — Project Status
 
-**Last updated:** May 17, 2026  
+**Last updated:** May 2026  
 **Author:** Greg Hudgins (Hudgins333)  
 **Repo:** https://github.com/Hudgins333/storehouse  
 **Target submission:** Ignyte Stablecoin Commerce Stack Challenge — Track 4: Agentic Economy Experience on Arc  
+**Submission deadline:** July 12, 2026  
 **Prize:** $4,000 / $2,000 USDC
 
 ---
@@ -41,7 +42,9 @@ Storehouse accepts inbound USDC from Ethereum Sepolia, Base Sepolia, or Arc dire
 
 ### Hybrid fiat leg — one obligation routes to real-world bills
 
-The car payment obligation routes via sandbox offramp (Cybrid or Bridge.xyz) to demonstrate USDC → fiat ACH bill payment. Other obligations (tithe, taxes, savings, operating) stay onchain. This adds the "agent touches the real world" wow factor without expanding scope to production fiat rails.
+The car payment obligation routes via sandbox offramp to demonstrate USDC → fiat ACH bill payment. Other obligations (tithe, taxes, savings, operating) stay onchain. This adds the "agent touches the real world" wow factor without expanding scope to production fiat rails.
+
+**Architectural note on chain hop:** Because Arc is a newer chain, the most established offramp providers do not yet accept Arc as a source chain on testnet. The architectural path for the fiat leg is therefore: Arc treasury wallet → CCTP V2 → Base Sepolia → offramp partner → fiat ACH. This reuses the CCTP V2 primitive Storehouse is already building for cross-chain inbound, in reverse. Adds one hop but no new infrastructure dependency.
 
 ### Track 4 tool coverage — 5 of 5
 
@@ -75,27 +78,14 @@ Storehouse uses all 5 recommended Track 4 tools:
 - Real `TitheRouted` event fired on testnet (first onchain transfer)
 - This is the demo artifact that proves "I can ship on Arc"
 
-**Storehouse Circle Developer-Controlled Wallets (May 16, 2026):**
-- 1 Wallet Set: "Storehouse v1 — Testnet"
-- 5 wallets created on Arc Testnet with **unique addresses** (Circle's docs say EVM wallets in a set share addresses, but in practice on Arc Testnet they didn't — favorable for Storehouse, each bucket is independently inspectable)
-- `storehouse-main` — receives inbound USDC, funded with testnet USDC from Circle faucet
-- `storehouse-tithe` — destination for tithe routing
-- `storehouse-tax-escrow` — destination for tax escrow
-- `storehouse-savings` — destination for savings goal
-- `storehouse-operating` — destination for remainder
+**Storehouse Circle Developer-Controlled Wallets:**
+- 5 wallets created on Arc Testnet, one per obligation bucket (main / tithe / tax-escrow / savings / operating)
+- Bootstrap script reproducible from `docs-planning/setup/`
+- Funded with testnet USDC from Circle faucet
 
-All wallet IDs and addresses stored in 1Password under `Storehouse Wallets — Arc Testnet`.
+### Offramp partner evaluation
 
-### Credential hygiene (all in 1Password)
-
-- `Circle Testnet API Key — Storehouse` — registered to home IP only
-- `Circle Testnet Entity Secret — Storehouse` — 64-char hex, the cryptographic key for wallet authorization
-- `Circle Recovery File — Storehouse Testnet` — encrypted recovery blob (base64) for disaster recovery
-- `Storehouse Wallets — Arc Testnet` — Wallet Set ID + 5 wallet IDs and addresses
-- `Supabase — Storehouse v1` — Project URL + publishable key + secret key + database password
-- `ngrok Auth Token — Storehouse` — local webhook tunneling
-- `GitHub PAT — Storehouse` — migrated from plaintext `~/github-pat.txt`
-- `Arc Commerce Tour — Storehouse Test Account` (if used)
+Multiple sandbox offramp providers are under active evaluation to identify the right rail for the fiat-leg obligation. Architecture is partner-agnostic — the executor calls a thin offramp adapter that can be backed by any of several candidate APIs.
 
 ### Dev environment
 
@@ -147,8 +137,6 @@ storehouse/
 
 ### Supabase project state
 
-**Project:** `Storehouse-v1` on Hudgins333's Org (free tier)
-
 **Tables present (commerce schema applied via migrations):**
 - `admin_wallets`
 - `credits`
@@ -179,17 +167,17 @@ The upstream arc-commerce bootstrap code (`lib/circle/initialize-admin-wallet.ts
 
 ### Issue 2: arc-commerce sign-up flow is irrelevant to Storehouse
 
-The credit-purchase platform's sign-up creates customer accounts with their own wallets — completely unrelated to Storehouse's single-user (Greg) model. We will not use this flow.
+The credit-purchase platform's sign-up creates customer accounts with their own wallets — completely unrelated to Storehouse's single-user model. We will not use this flow.
 
 ### Issue 3: Webhook URL not yet registered with Circle Console
 
 Arc-commerce README mentions registering the ngrok URL at Circle Console → Webhooks. We have not done this. It's blocked behind the bootstrap issue and irrelevant to Storehouse's webhook setup anyway. Storehouse will register its own webhook URL when ready.
 
-### Issue 4: Bridge.xyz rejected individual application (Cybrid pending)
+### Issue 4: Offramp partner selection in progress
 
-Bridge.xyz declined sandbox access for an individual developer. Reapplication with LLC is the next move but has not been completed. Cybrid sandbox application is still pending response 24+ hours after submission. Offramp leg is therefore at risk for v1.
+The fiat-leg obligation requires a USDC → ACH offramp rail. Multiple sandbox providers are under evaluation. The integration surface is abstracted behind a thin adapter, so the choice of partner is a swap rather than a rewrite. Selection criteria include sandbox accessibility, API design fit (backend-triggered programmatic flow rather than user-facing widget), source-chain support, and post-hackathon production path.
 
-**Decision:** Continue building. If neither approved by Week 3, ship v1 with offramp leg architecturally implemented but using a deterministic stub for the demo, with submission notes explaining production integration path.
+A final v1 partner decision will be made in Week 1 of the build phase. Until then, a working sandbox path is already validated as a fallback, so the offramp leg is no longer at risk for v1.
 
 ---
 
@@ -204,35 +192,38 @@ Bridge.xyz declined sandbox access for an individual developer. Reapplication wi
 5. **Verify tables in Supabase Editor** — confirm 9 Storehouse tables exist, commerce tables gone. ~5 min.
 6. **Commit everything, push to GitHub** — Day 1 deliverable is "Storehouse has a real database matching the spec." ~5 min.
 
-### Week 1 — Foundation + Cross-chain inbound
+### Week 1 — Foundation + Cross-chain inbound + Offramp decision
 
-- Replace `lib/circle/initialize-admin-wallet.ts` with Storehouse's own bootstrap script (we have one already in `docs-planning/setup/03-create-wallets.js` — the wallets exist; bootstrap is essentially a no-op besides loading them).
+- Replace `lib/circle/initialize-admin-wallet.ts` with Storehouse's own bootstrap script.
 - Integrate Bridge Kit SDK for CCTP V2
 - Set up watcher addresses on Ethereum Sepolia and Base Sepolia
 - Test cross-chain inbound: send testnet USDC from Sepolia → trigger CCTP → verify Arc arrival
 - Configure Circle webhook with ngrok URL, verify event delivery to local app
+- Finalize offramp partner selection
 
-### Week 2 — Core agents (no UI yet)
+### Weeks 2–3 — Core agents + UI + Nanopayments swap + Offramp integration
 
 - Income Classifier (Claude API, structured output)
 - Routing Agent (Claude API, JSON plan output, deterministic validator)
 - Executor using Circle SDK (direct transfers for v1.0)
-- End-to-end test: trigger webhook manually → classification → routing → transfers fire → ledger updated
-- All via API/CLI, no UI yet
-
-### Week 3 — UI + Nanopayments swap + Conversational Agent + Offramp
-
 - Migrate executor to Gateway/Nanopayments authorizations
 - Dashboard: obligation table, income events, bucket balances, ledger
 - Chat interface for Conversational Agent
-- Sandbox offramp integration (Cybrid or Bridge or stub)
 - Real-time updates via Supabase subscriptions
+- Offramp integration against selected partner's sandbox — wire the chosen rail end-to-end, including the CCTP V2 Arc→Base hop for the fiat-leg obligation. Target: a real working offramp call in the demo, not a deterministic stub.
 
-### Week 4 — Demo polish + submission
+### Weeks 4–6 — Integration testing + demo polish
 
+- End-to-end test passes: webhook → classification → routing → transfers fire → ledger updated → offramp leg executes against sandbox
 - Record demo video (3-4 takes minimum, 60-90 seconds)
 - Write architecture diagram
 - Write Circle Product Feedback section (compiled from this debugging journey)
+
+### Week 7 — Submission
+
+- Submission writeup finalized in SUBMISSION.md
+- GitHub README polished, repo cleaned up
+- Final demo video edit
 - Submit to Ignyte
 
 ---
@@ -262,11 +253,12 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 | Staged v1.0 → v1.1 (direct transfers → Gateway/Nanopayments) | Manage build risk; ship cognition layer first, swap execution rail later. |
 | CCTP in v1 (not v2) | 5/5 tool coverage; real-world income is multi-chain. |
 | Hybrid fiat leg (one obligation) | Wow factor without scope creep. |
-| Single-user (Greg) for v1 | Avoids MSB regulatory questions. Stay within hackathon's "educational/testnet" scope. |
+| Single-user for v1 | Avoids MSB regulatory questions. Stay within hackathon's "educational/testnet" scope. |
 | Skip LI.FI for v1 | CCTP via Bridge Kit covers cross-chain USDC; LI.FI is post-hackathon roadmap. |
-| 1Password for all secrets | Standardized credential hygiene from Day 1. |
 | Fork arc-commerce | Get Circle SDK + Supabase + Webhook scaffolding for free. Replace commerce-specific code. |
 | Pivot from upstream bootstrap | Storehouse uses its own init, not arc-commerce's broken admin-wallet bootstrap. |
+| Offramp adapter pattern | Partner-agnostic abstraction; partner choice is a swap rather than a rewrite. |
+| Arc + CCTP V2 → Base for fiat leg | Bridges to a more widely-supported source chain for offramp. Reuses existing CCTP infrastructure in reverse. |
 
 ---
 
