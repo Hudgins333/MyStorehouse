@@ -46,7 +46,7 @@ CREATE TABLE public.obligations (
   id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name                     TEXT NOT NULL,
   type                     TEXT NOT NULL CHECK (type IN ('percentage', 'fixed', 'goal')),
-  amount                   NUMERIC NOT NULL,
+  amount                   NUMERIC,
   destination_address      TEXT NOT NULL,
   destination_label        TEXT,
   destination_type         TEXT NOT NULL CHECK (destination_type IN ('onchain', 'fiat_offramp')),
@@ -68,6 +68,8 @@ CREATE TRIGGER set_updated_at
   BEFORE UPDATE ON public.obligations
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
+ALTER TABLE public.obligations ADD CONSTRAINT obligations_name_unique UNIQUE (name);
+
 -- ---------------------------------------------------------------------------
 -- Table: buckets
 -- ---------------------------------------------------------------------------
@@ -86,6 +88,8 @@ CREATE TABLE public.buckets (
 );
 
 CREATE INDEX idx_buckets_obligation ON public.buckets(obligation_id);
+
+ALTER TABLE public.buckets ADD CONSTRAINT buckets_obligation_id_unique UNIQUE (obligation_id);
 
 CREATE TRIGGER set_updated_at
   BEFORE UPDATE ON public.buckets

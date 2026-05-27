@@ -25,3 +25,36 @@ Migration body references `public.handle_updated_at()` in the trigger creation. 
 1. Ensure `handle_updated_at` function is created in an early migration, before any migration that uses it as a trigger
 2. Better error messages on platform initialization failure — at minimum, log which table query failed
 3. Add a "first-run verification" step to README that checks expected tables exist after `db push`
+
+## Issue: NEXT_PUBLIC_SUPABASE_URL must be base URL only
+
+**Date:** May 26, 2026
+**Context:** Running seed script against Storehouse-v1 Supabase project
+**Severity:** Blocks all Supabase API calls silently
+
+### What happened
+
+The `NEXT_PUBLIC_SUPABASE_URL` environment variable had `/rest/v1/` appended
+to the base project URL. The Supabase JS client constructs the REST path
+internally, so the effective URL became `.supabase.co/rest/v1//rest/v1/`
+(double path), causing every API call to fail with "Invalid path specified
+in request URL" — the same PGRST125 error pattern as Issue 1.
+
+### Impact
+
+All Supabase client calls fail. Error message does not indicate the URL is
+malformed — it presents as a PostgREST path error, making it hard to
+diagnose without inspecting the raw URL.
+
+### Fix
+
+Set NEXT_PUBLIC_SUPABASE_URL to the base project URL only:
+  NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+
+Do not append /rest/v1/, /auth/v1/, or any path suffix.
+
+### Recommendation
+
+Add URL validation to the Supabase client initialization that checks for
+and warns on trailing path segments. A simple check for '/rest' or '/auth'
+in the URL before client creation would catch this immediately.
