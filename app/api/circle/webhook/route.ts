@@ -178,7 +178,7 @@ async function handleInboundTransfer(
 
   // Circle amounts are in the token's smallest unit (USDC = 6 decimals)
   // Convert to human-readable USDC amount
-  const amountUsdc = (parseFloat(rawAmount) / 1_000_000).toString();
+  const amountUsdc = parseFloat(rawAmount).toString();
 
   if (parseFloat(amountUsdc) <= 0) {
     console.warn(`Webhook: zero-amount transfer, ignoring`);
