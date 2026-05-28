@@ -44,7 +44,7 @@ const supabaseAdminClient = createClient(
 
 const WALLETS = {
   tithe:      "0x4e570076026c7636fc5bb32bab192a457c2a52df",
-  taxEscrow:  "0x3f5dc29c0b824d5740a5053f4f8420a4d08551d0S",
+  taxEscrow:  "0x3f5dc29c0b824d5740a5053f4f8420a4d08551d0",
   savings:    "0x93f1e2d244b2005354674949e7c56bd2606fe6d3",
   operating:  "0xa54dad10836b82667d2e357b01df5944ebe0d624",
   // Car payment routes via offramp — fiat destination, not an onchain wallet.
