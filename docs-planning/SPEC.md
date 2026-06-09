@@ -1,7 +1,7 @@
 # Storehouse — Technical Specification
 
 **Status:** Draft v1
-**Last updated:** 2026-05-15
+**Last updated:** 2026-06-09
 **Author:** Greg Hudgins (Hudgins333)
 **Submission target:** Ignyte "Stablecoin Commerce Stack Challenge" — Track 4: Best Agentic Economy Experience on Arc
 
@@ -313,9 +313,13 @@ Storehouse has three distinct LLM-powered agents, each with a focused role:
 **Model:** Claude Sonnet
 **Purpose:** Configuration ("set up my tithe at 10%"), advisory ("can I afford X?"), explanation ("why did you route my last paycheck that way?")
 
+**v1 surface & scope (see §13):** In v1 this agent runs on Telegram and handles intake + read-side advisory + explanation. Live config mutation ("set tithe to 12%") is deferred to Phase 2 behind a feature flag, gated by the same propose/validate pattern as routing (§5.4).
+
 ## 8. The Demo Flow (60-90 seconds)
 
 This is the demo we shoot for the submission video. Every architectural choice serves this.
+
+> **Surface note (see §13):** The v1 intake surface is the Telegram bot, not an in-dashboard chat, and the dashboard is read-only. Scene 1 below predates that decision and will be revised in a demo-flow pass.
 
 **Scene 1: Setup (10s)**
 Open Storehouse dashboard. Empty state.
@@ -434,6 +438,123 @@ End card.
 ## 12. Naming Note
 
 The product is **Storehouse**, rooted in Malachi 3:10. The faith framing is the *why* behind the prioritization logic (stewardship as scriptural discipline), not a wedge in the product description. The README and demo can lead with the stewardship narrative. The technical pitch for judges leads with "household CFO agent" framing — both are true, both serve different audiences.
+
+## 13. Conversational Surface (Telegram v1)
+
+### 13.1 Purpose
+
+Storehouse's conversational surface is how the user talks to the agent in plain language — to set up obligations, to ask what is happening with their money, and to hear the agent explain its own decisions. In v1 this surface is a Telegram bot. Its three responsibilities:
+
+1. Walk a new user through natural-language obligation intake that produces validated rows in the `obligations` table (§6).
+2. Answer read-only advisory questions ("what's my balance?", "what's due this month?", "what came in last week?").
+3. Explain routing decisions on request ("why did you route last paycheck that way?"), drawing on the stored reasoning in `routing_decisions` (§6).
+
+The surface exists because the worst part of every personal-finance tool is the empty-table problem: a user is dropped in front of a dashboard and told to "configure your obligations." That is exactly the allocation cognitive load Storehouse is built to remove (§2). Conversational intake — "tell me about your bills" — is how a human advisor would do it. The same brain handles ongoing questions, because the value of an agent is that you can ask it things in the moment money decisions actually happen, which is rarely at a desk.
+
+### 13.2 Brain and transport are separate
+
+The Conversational Agent (§7.3, Claude Sonnet) is a transport-agnostic core. It reasons about obligations, balances, and routing history and returns structured responses. Telegram is a thin *adapter* over that core — a mouth, not the product. Nothing in the agent layer knows it is speaking through Telegram specifically.
+
+This is the swappable-adapter pattern applied to the surface (same discipline as the `OfframpAdapter`). It keeps the surface choice a two-way door: Telegram ships in v1 because it is cheap to build, demos cleanly, and matches how the operator already runs agents; a branded PWA or native app can be added later as a second adapter against the same brain, with no change to the agent layer (§13.10). The mass-market surface is expected to evolve toward an owned app; the architecture does not have to change when it does.
+
+### 13.3 Scope (v1)
+
+**In scope:**
+- One Telegram bot, registered via BotFather, token in 1Password.
+- Hardcoded to a single authorized Telegram user ID (the operator's). All other IDs are rejected with a static message.
+- Conversational obligation intake driven by Sonnet, producing validated rows in `obligations`.
+- Read-side advisory: balances, what is due, recent activity — all reads, no writes.
+- Explanation of routing decisions, drawing on stored `routing_decisions` reasoning.
+- A confirmation step before any database write during intake.
+
+**Deferred to Phase 2 (feature-flagged, not abandoned):**
+- Live config mutation via chat ("set tithe to 12%"). Sequenced deliberately — see §13.4.
+- Routing/push notifications ("paycheck routed: $X to tithe…").
+- Multi-tenant support, per-user wallet provisioning, deeplink/invite flows. The single-user assumption (§4) holds for v1.
+
+### 13.4 Why config mutation is deferred, not dropped
+
+Mutation — letting a chat message change financial configuration the agent then acts on — is the one conversational action that *writes* state. It is held behind a feature flag and sequenced into Phase 2 for a deliberate reason, not for lack of time.
+
+The mutation path must ride the same safety discipline as the Routing Agent (§5.4): the LLM proposes a structured change, deterministic code validates it (the field is mutable, the value parses, it falls within the allowed range, and it does not violate a locked constraint such as a tax-escrow instant-withdrawal rule), and only a validated change is written, with a re-prompt loop on invalid output. Building mutation *after* the read-and-explain surface is proven means the highest-stakes write path is added on top of a working, observable foundation rather than alongside it. The interface and the brain are mutation-ready by design; the write path is simply enabled later, behind the flag.
+
+(This also satisfies the contingency anticipated in §11/R4 — advisory-only is the v1 floor, with config-via-chat as a controlled add-on rather than a v1 dependency.)
+
+### 13.5 Conversation design (intake)
+
+Two intake modes, selected automatically from the user's first substantive response.
+
+**Guided mode (default).** One question at a time: greet → first obligation → amount → cadence (monthly, percentage of income, fixed escrow target) → due date or trigger → confirm captured obligation → ask if there is another → loop until "done." Reliable and easy to debug.
+
+**Free-form mode.** If the first message dumps multiple obligations at once ("car payment $487 the 5th, tithe 10%, tax escrow 25%, savings $500/mo, rest is operating"), Sonnet extracts all of them and presents the full list for confirmation before writing. If extraction is ambiguous, the bot falls back to guided mode to fill gaps.
+
+In both modes the final step is a single confirmation showing all captured obligations as a numbered list; the user replies "yes" / "no" / "edit N" to commit, abort, or revise. Only on "yes" does the bot write to `obligations`.
+
+### 13.6 Data-model addition (extends §6)
+
+One new table for the bot's working memory during intake:
+
+```sql
+onboarding_sessions (
+  id                  UUID PRIMARY KEY,
+  telegram_user_id    BIGINT NOT NULL,
+  state               TEXT NOT NULL,    -- 'idle' | 'collecting' | 'confirming' | 'complete'
+  partial_obligations JSONB,            -- staged obligations before commit
+  last_message_at     TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ,
+  completed_at        TIMESTAMPTZ
+)
+```
+
+This is working memory between Telegram updates, not the source of truth for obligations — `obligations` (§6) is. `partial_obligations` is discarded on successful commit or session reset. No change to the `obligations` schema itself; a row populated via Telegram is identical to one populated via any future surface.
+
+### 13.7 Architecture
+
+**Telegram webhook endpoint:** `/api/telegram/webhook` (Next.js API route). Receives Telegram update payloads, verifies the secret token in the header, filters by authorized Telegram user ID, and routes to the adapter.
+
+**Telegram adapter → Conversational Agent.** The adapter translates the inbound Telegram update into a transport-neutral message for the Conversational Agent and translates the agent's structured response back into a Telegram Bot API reply. The agent itself is unaware of Telegram. For intake it loads or creates the user's `onboarding_sessions` row and passes the current state and history to Sonnet with the obligation schema in the system prompt; Sonnet returns (a) a next question, (b) a partial obligation to stage, or (c) a final commit instruction. For advisory and explanation, the adapter passes the read query through to the agent, which answers from `obligations`, `buckets`, and `routing_decisions`. Deterministic code — not Sonnet — performs all database access.
+
+**Same safety pattern as the Routing Agent (§5.4).** The LLM proposes structured output; deterministic code validates (amounts parseable, due dates real calendar dates, cadences in the allowed set, no duplicate obligations) before any row is written. Invalid Sonnet outputs trigger a re-prompt up to 3 times, then the bot asks a clarifying question rather than failing silently.
+
+**Conversation state strategy:** stateful via `onboarding_sessions` during intake; advisory and explanation are stateless reads.
+
+### 13.8 Authentication & authorization
+
+- Telegram bot token in 1Password as `Telegram Bot Token — Storehouse`.
+- Webhook secret token configured at registration, in 1Password as `Telegram Webhook Secret — Storehouse`, verified on every inbound request.
+- Authorized Telegram user ID in `.env.local` as `TELEGRAM_AUTHORIZED_USER_ID`. The handler rejects any update whose `message.from.id` does not match, with: "This bot is in private preview."
+- No tokens, no deeplinks, no invite codes for v1.
+- When mutation is enabled in Phase 2 it inherits this same single-user gate plus the validation layer in §13.4; it does not widen the auth surface on its own.
+
+### 13.9 Failure modes
+
+- **Sonnet returns malformed JSON:** re-prompt up to 3 times, then ask a plain-English clarifying question.
+- **Database write fails:** "couldn't save that just now, try again in a moment," preserving `partial_obligations` so work isn't lost.
+- **Telegram delivery fails:** Telegram retries automatically; idempotency via the Telegram update ID against a small dedup cache.
+- **User abandons mid-onboarding:** session sits in `collecting` indefinitely; the next message resumes. No timeout cleanup in v1.
+
+### 13.10 Relationship to the dashboard, and the path to an owned surface
+
+For v1 the dashboard is read-only: it renders live balance, obligations, recent activity, and routing reasoning. All conversation — intake, advisory, explanation — happens through the Telegram surface, not the dashboard. This keeps the dashboard simple (Server Components, no client-side fetching) and gives the conversational layer a single home in v1.
+
+The dashboard is also the seed of the eventual owned surface. The expected Phase 3 direction for a mass-market product is a branded PWA built from the existing Next.js dashboard: installable, push-capable, with auth and identity Storehouse controls, running *alongside* the Telegram adapter rather than replacing it. Because the Conversational Agent is transport-agnostic (§13.2), surfacing it inside that PWA is the addition of another adapter, not a re-architecture. v1 deliberately does not build this; it only avoids decisions that would foreclose it.
+
+### 13.11 Demo role
+
+The Telegram bot is the opening of the demo (cf. §8): the operator sends a message, walks through three to four obligations conversationally, confirms, and the view cuts to the dashboard showing those obligations populated. The remainder is the autonomous routing flow and the agent explaining its decisions — including any obligation it deferred and why — read back through the conversational surface and shown on the dashboard. Plain language goes in; structured, reasoned state comes out.
+
+> **Note:** §8's Scene 1 currently depicts in-dashboard chat for setup. That predates this decision; the v1 intake surface is the Telegram bot and the dashboard is read-only. The demo flow in §8 should be revised to match in a later pass.
+
+### 13.12 Non-goals & future work
+
+- **Phase 2 (planned, feature-flagged):** live config mutation via chat (§13.4); routing/push notifications via Telegram.
+- **Phase 3 (planned):** branded PWA surface built from the dashboard (§13.10).
+- **Post-hackathon, requires analysis:** multi-user support with per-user wallet provisioning (MSB/custody review, cf. §4); migration to an SMS or WhatsApp surface.
+- **Out of scope for now:** voice-message intake (transcription) — interesting but unrelated to Track 4.
+
+### 13.13 Build estimate (v1)
+
+Approximately one to one-and-a-half focused days: webhook route + auth (~1h), Telegram adapter + transport-neutral message contract (~1h), `onboarding_sessions` table and queries (~1h), Sonnet extraction prompt iteration (~2h), guided-mode loop (~2h), confirmation/commit path (~1h), free-form mode as a prompt variant (~1h), read-side advisory and explanation against existing data (~2–3h). Mutation is excluded from this estimate (Phase 2). Onboarding feeds the dashboard's data, so it needs to exist before the dashboard is meaningful to demo.
 
 ---
 
