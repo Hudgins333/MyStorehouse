@@ -55,8 +55,8 @@ interface ObligationForPrompt {
 
 async function loadActiveObligations(): Promise<ObligationForPrompt[]> {
   const { data, error } = await supabaseAdminClient
-    .from("obligations")
-    .select(`
+      .from("obligations")
+      .select(`
       id,
       name,
       type,
@@ -71,8 +71,8 @@ async function loadActiveObligations(): Promise<ObligationForPrompt[]> {
       current_period_filled,
       buckets ( current_balance )
     `)
-    .eq("active", true)
-    .order("priority", { ascending: true });
+      .eq("active", true)
+      .order("priority", { ascending: true });
 
   if (error) {
     throw new Error(`Failed to load obligations: ${error.message}`);
@@ -143,39 +143,39 @@ Rules:
 If a validation error is included in the user message, you previously proposed an invalid plan. Read the error, fix it, and try again.`;
 
 function buildUserPrompt(
-  event: IncomeEventRow,
-  obligations: ObligationForPrompt[],
-  todayIso: string,
-  previousError?: string
+    event: IncomeEventRow,
+    obligations: ObligationForPrompt[],
+    todayIso: string,
+    previousError?: string
 ): string {
   const obligationsText = obligations
-    .map((o) => {
-      const lines = [
-        `- ${o.name} (id: ${o.id}, priority ${o.priority}, type ${o.type})`,
-        `    destination: ${o.destination_address} [${o.destination_type}]`,
-      ];
-      if (o.type === "percentage" && o.amount) {
-        lines.push(`    fraction: ${o.amount}`);
-      }
-      if (o.type === "fixed" && o.amount) {
-        lines.push(`    amount due: ${o.amount} USDC`);
-      }
-      if (o.due_date) {
-        lines.push(`    due_date: ${o.due_date} (${o.due_recurrence ?? "one-time"})`);
-      }
-      if (o.current_period_target) {
-        lines.push(
-          `    progress: ${o.current_period_filled} / ${o.current_period_target} this period`
-        );
-      }
-      lines.push(`    bucket balance: ${o.current_balance} USDC`);
-      return lines.join("\n");
-    })
-    .join("\n\n");
+      .map((o) => {
+        const lines = [
+          `- ${o.name} (id: ${o.id}, priority ${o.priority}, type ${o.type})`,
+          `    destination: ${o.destination_address} [${o.destination_type}]`,
+        ];
+        if (o.type === "percentage" && o.amount) {
+          lines.push(`    fraction: ${o.amount}`);
+        }
+        if (o.type === "fixed" && o.amount) {
+          lines.push(`    amount due: ${o.amount} USDC`);
+        }
+        if (o.due_date) {
+          lines.push(`    due_date: ${o.due_date} (${o.due_recurrence ?? "one-time"})`);
+        }
+        if (o.current_period_target) {
+          lines.push(
+              `    progress: ${o.current_period_filled} / ${o.current_period_target} this period`
+          );
+        }
+        lines.push(`    bucket balance: ${o.current_balance} USDC`);
+        return lines.join("\n");
+      })
+      .join("\n\n");
 
   const errorBlock = previousError
-    ? `\n\nPREVIOUS ATTEMPT FAILED VALIDATION:\n${previousError}\n\nFix the issue and respond with a corrected plan.\n`
-    : "";
+      ? `\n\nPREVIOUS ATTEMPT FAILED VALIDATION:\n${previousError}\n\nFix the issue and respond with a corrected plan.\n`
+      : "";
 
   return `Today's date: ${todayIso}
 
@@ -199,10 +199,10 @@ Produce the allocation plan as JSON.`;
 
 function parsePlan(rawResponse: string): RoutingPlan {
   const cleaned = rawResponse
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "")
+      .trim();
 
   let parsed: unknown;
   try {
@@ -224,30 +224,30 @@ function parsePlan(rawResponse: string): RoutingPlan {
   }
 
   const allocations: AllocationItem[] = obj.allocations.map(
-    (a: unknown, i: number) => {
-      if (typeof a !== "object" || a === null) {
-        throw new Error(`Allocation ${i} is not an object`);
+      (a: unknown, i: number) => {
+        if (typeof a !== "object" || a === null) {
+          throw new Error(`Allocation ${i} is not an object`);
+        }
+        const ao = a as Record<string, unknown>;
+        if (typeof ao.obligation_id !== "string") {
+          throw new Error(`Allocation ${i} missing obligation_id`);
+        }
+        if (typeof ao.obligation_name !== "string") {
+          throw new Error(`Allocation ${i} missing obligation_name`);
+        }
+        if (typeof ao.destination_address !== "string") {
+          throw new Error(`Allocation ${i} missing destination_address`);
+        }
+        if (typeof ao.amount !== "string") {
+          throw new Error(`Allocation ${i} missing amount (must be a string)`);
+        }
+        return {
+          obligation_id: ao.obligation_id,
+          obligation_name: ao.obligation_name,
+          destination_address: ao.destination_address,
+          amount: ao.amount,
+        };
       }
-      const ao = a as Record<string, unknown>;
-      if (typeof ao.obligation_id !== "string") {
-        throw new Error(`Allocation ${i} missing obligation_id`);
-      }
-      if (typeof ao.obligation_name !== "string") {
-        throw new Error(`Allocation ${i} missing obligation_name`);
-      }
-      if (typeof ao.destination_address !== "string") {
-        throw new Error(`Allocation ${i} missing destination_address`);
-      }
-      if (typeof ao.amount !== "string") {
-        throw new Error(`Allocation ${i} missing amount (must be a string)`);
-      }
-      return {
-        obligation_id: ao.obligation_id,
-        obligation_name: ao.obligation_name,
-        destination_address: ao.destination_address,
-        amount: ao.amount,
-      };
-    }
   );
 
   return {
@@ -274,14 +274,14 @@ export interface RoutingResult {
  * Writes the resulting routing_decision row (validated or not) for audit trail.
  */
 export async function routeIncomeEvent(
-  event: IncomeEventRow
+    event: IncomeEventRow
 ): Promise<RoutingResult> {
   if (event.classification === null) {
     throw new Error(`income_event ${event.id} has no classification yet`);
   }
   if (event.status !== "arrived_on_arc") {
     throw new Error(
-      `income_event ${event.id} is in status ${event.status}, expected arrived_on_arc`
+        `income_event ${event.id} is in status ${event.status}, expected arrived_on_arc`
     );
   }
 
@@ -294,6 +294,7 @@ export async function routeIncomeEvent(
     id: o.id,
     name: o.name,
     destination_address: o.destination_address,
+    destination_type: o.destination_type,
   }));
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -304,7 +305,7 @@ export async function routeIncomeEvent(
   let previousError: string | undefined;
 
   console.log(
-    `Routing income_event ${event.id.slice(0, 8)}... (${event.amount} USDC, classified as ${event.classification})`
+      `Routing income_event ${event.id.slice(0, 8)}... (${event.amount} USDC, classified as ${event.classification})`
   );
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
@@ -348,7 +349,7 @@ export async function routeIncomeEvent(
     }
 
     console.warn(
-      `  attempt ${attempt}: validation failed — ${validation.errors.join("; ")}`
+        `  attempt ${attempt}: validation failed — ${validation.errors.join("; ")}`
     );
     previousError = validation.errors.join("\n");
   }
@@ -357,37 +358,37 @@ export async function routeIncomeEvent(
   const validated = lastErrors.length === 0 && lastPlan !== null;
 
   const planJson = lastPlan
-    ? lastPlan
-    : { allocations: [], reasoning: "(no valid plan after retries)" };
+      ? lastPlan
+      : { allocations: [], reasoning: "(no valid plan after retries)" };
 
   const reasoning = lastPlan?.reasoning ?? "(no valid plan after retries)";
 
   const { data: decisionRow, error: insertError } = await supabaseAdminClient
-    .from("routing_decisions")
-    .insert({
-      income_event_id: event.id,
-      plan: planJson as any,
-      llm_reasoning: reasoning,
-      llm_model: CLAUDE_HAIKU_MODEL,
-      validated,
-      validation_errors: lastErrors.length > 0 ? lastErrors : null,
-    })
-    .select("id")
-    .single();
+      .from("routing_decisions")
+      .insert({
+        income_event_id: event.id,
+        plan: planJson as any,
+        llm_reasoning: reasoning,
+        llm_model: CLAUDE_HAIKU_MODEL,
+        validated,
+        validation_errors: lastErrors.length > 0 ? lastErrors : null,
+      })
+      .select("id")
+      .single();
 
   if (insertError || !decisionRow) {
     throw new Error(
-      `Failed to persist routing_decision: ${insertError?.message ?? "no row returned"}`
+        `Failed to persist routing_decision: ${insertError?.message ?? "no row returned"}`
     );
   }
 
   if (validated) {
     console.log(
-      `  ✓ routing_decision ${decisionRow.id.slice(0, 8)}... persisted (validated)`
+        `  ✓ routing_decision ${decisionRow.id.slice(0, 8)}... persisted (validated)`
     );
   } else {
     console.warn(
-      `  ✗ routing_decision ${decisionRow.id.slice(0, 8)}... persisted with ${lastErrors.length} validation error(s)`
+        `  ✗ routing_decision ${decisionRow.id.slice(0, 8)}... persisted with ${lastErrors.length} validation error(s)`
     );
   }
 
@@ -411,10 +412,10 @@ export async function routeAllPending(): Promise<{
   failed: number;
 }> {
   const { data: candidates, error: fetchError } = await supabaseAdminClient
-    .from("income_events")
-    .select("*")
-    .eq("status", "arrived_on_arc")
-    .not("classification", "is", null);
+      .from("income_events")
+      .select("*")
+      .eq("status", "arrived_on_arc")
+      .not("classification", "is", null);
 
   if (fetchError) {
     throw new Error(`Failed to fetch routable events: ${fetchError.message}`);
@@ -427,20 +428,20 @@ export async function routeAllPending(): Promise<{
 
   // Filter out events that already have a validated routing_decision
   const { data: existingDecisions } = await supabaseAdminClient
-    .from("routing_decisions")
-    .select("income_event_id")
-    .in(
-      "income_event_id",
-      candidates.map((c: any) => c.id)
-    )
-    .eq("validated", true);
+      .from("routing_decisions")
+      .select("income_event_id")
+      .in(
+          "income_event_id",
+          candidates.map((c: any) => c.id)
+      )
+      .eq("validated", true);
 
   const alreadyRouted = new Set(
-    (existingDecisions ?? []).map((d: any) => d.income_event_id)
+      (existingDecisions ?? []).map((d: any) => d.income_event_id)
   );
 
   const toRoute = (candidates as IncomeEventRow[]).filter(
-    (c) => !alreadyRouted.has(c.id)
+      (c) => !alreadyRouted.has(c.id)
   );
 
   if (toRoute.length === 0) {

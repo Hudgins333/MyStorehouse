@@ -26,6 +26,7 @@ export interface ObligationContext {
   id: string;
   name: string;
   destination_address: string;
+  destination_type: "onchain" | "fiat_offramp";
 }
 
 /**
@@ -86,6 +87,21 @@ export function validateRoutingPlan(
       errors.push(
         `${prefix}: destination_address ${a.destination_address} does not match obligation ${obligation.name} (${obligation.destination_address})`
       );
+    }
+
+    // For onchain obligations, the address must be a valid Ethereum address
+    // (0x prefix + 40 hex characters). For fiat_offramp obligations, the
+    // address can be a placeholder/sentinel — the offramp adapter handles the
+    // actual destination resolution.
+    if (obligation.destination_type === "onchain") {
+      const isValidEvmAddress = /^0x[a-fA-F0-9]{40}$/.test(
+        a.destination_address
+      );
+      if (!isValidEvmAddress) {
+        errors.push(
+          `${prefix}: destination_address ${a.destination_address} is not a valid Ethereum address (expected 0x + 40 hex chars)`
+        );
+      }
     }
 
     // No duplicate obligations in one plan
