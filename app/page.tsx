@@ -1,45 +1,47 @@
 /**
- * Copyright 2025 Circle Internet Group, Inc.  All rights reserved.
+ * Storehouse — Main Dashboard
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * The single-page Storehouse dashboard. Replaces the arc-commerce credit-
+ * purchase landing page entirely.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * SPDX-License-Identifier: Apache-2.0
+ * Server Component composition: three sections, each a Server Component
+ * that fetches its own data. If one fails, the others still render.
  */
 
-import { EnvVarWarning } from "@/components/env-var-warning";
-import { AuthButton } from "@/components/auth-button";
-import { Hero } from "@/components/hero";
-import { ThemeSwitcher } from "@/components/theme-switcher";
-import { hasEnvVars } from "@/lib/utils";
-import Link from "next/link";
+import { Suspense } from "react";
+import { MainWalletCard } from "./_dashboard/main-wallet-card";
+import { ObligationsSection } from "./_dashboard/obligations-section";
+import { RecentActivity } from "./_dashboard/recent-activity";
 
-export default function Home() {
+export default async function StorehousePage() {
   return (
-    <main className="min-h-screen flex flex-col items-center">
-      <div className="flex-1 w-full flex flex-col gap-20 items-center">
-        <nav className="w-full flex justify-center border-b border-b-foreground/10 h-16">
-          <div className="w-full max-w-5xl flex justify-between items-center p-3 px-5 text-sm">
-            <div className="flex gap-5 items-center font-semibold">
-              <ThemeSwitcher />
-              <Link href={"/"}>Arc Commerce</Link>
-            </div>
-            {!hasEnvVars ? <EnvVarWarning /> : <AuthButton />}
-          </div>
-        </nav>
-        <div className="flex-1 flex flex-col gap-20 max-w-5xl p-5">
-          <Hero />
+      <main className="container mx-auto py-8 px-4 max-w-5xl space-y-6">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight">Storehouse</h1>
+          <p className="text-sm text-muted-foreground">
+            Autonomous personal finance agent · Arc Testnet
+          </p>
         </div>
+
+        <Suspense fallback={<SectionLoading label="Main wallet" />}>
+          <MainWalletCard />
+        </Suspense>
+
+        <Suspense fallback={<SectionLoading label="Obligations" />}>
+          <ObligationsSection />
+        </Suspense>
+
+        <Suspense fallback={<SectionLoading label="Recent activity" />}>
+          <RecentActivity />
+        </Suspense>
+      </main>
+  );
+}
+
+function SectionLoading({ label }: { label: string }) {
+  return (
+      <div className="rounded-md border border-muted p-6 text-sm text-muted-foreground">
+        Loading {label}…
       </div>
-    </main>
   );
 }
