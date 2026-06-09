@@ -240,6 +240,10 @@ CREATE TABLE public.transfers (
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.transfers
+ADD CONSTRAINT transfers_unique_per_allocation
+UNIQUE (routing_decision_id, obligation_id);
+
 CREATE INDEX idx_transfers_routing_decision ON public.transfers(routing_decision_id);
 CREATE INDEX idx_transfers_status ON public.transfers(status);
 
