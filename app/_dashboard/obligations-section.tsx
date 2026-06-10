@@ -114,7 +114,7 @@ export async function ObligationsSection() {
                                 <TableHead>Type</TableHead>
                                 <TableHead>Amount</TableHead>
                                 <TableHead>Destination</TableHead>
-                                <TableHead className="text-right">Bucket Balance</TableHead>
+                                <TableHead className="text-right">Routed</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
