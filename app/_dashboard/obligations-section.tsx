@@ -64,7 +64,11 @@ async function loadObligationsWithBuckets(): Promise<ObligationWithBucket[]> {
         priority: row.priority,
         destination_type: row.destination_type,
         due_date: row.due_date,
-        current_balance: row.buckets?.[0]?.current_balance ?? "0",
+        current_balance: String(
+            (Array.isArray(row.buckets)
+                ? row.buckets[0]?.current_balance
+                : row.buckets?.current_balance) ?? "0"
+        ),
     }));
 }
 
