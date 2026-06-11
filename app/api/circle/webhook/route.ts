@@ -1,23 +1,24 @@
 /**
  * Storehouse — Circle webhook handler
  *
- * Receives Circle transaction notifications and creates income_events rows
- * for inbound USDC transfers to storehouse-main. The webhook handler is a
- * receiver only — it captures events and returns 200 immediately. Agent
- * classification and routing happen asynchronously.
+ * Receives Circle transaction notifications. Inbound transfers to
+ * storehouse-main become income_events; outbound transfer confirmations
+ * drive the bucket-credit loop via confirm_transfer(). The handler is a
+ * receiver only — it captures events and returns 200 immediately.
  *
  * Circle webhook flow:
  *   1. Circle POSTs a signed notification to this endpoint
  *   2. We verify the signature against Circle's public key
- *   3. If it's an inbound USDC transfer to storehouse-main → create income_event
+ *   3. inbound to storehouse-main  → create income_event
+ *      outbound COMPLETE           → confirm_transfer (mark confirmed, credit bucket)
  *   4. Return 200 immediately (Circle retries on non-200)
  *
  * Supported notification types:
- *   - transactions.inbound   → creates income_event with status 'pending'
- *   - transactions.outbound  → ignored (handled by executor polling)
+ *   - transactions.inbound   → creates income_event (status from cctp flag)
+ *   - transactions.outbound  → on COMPLETE, confirms transfer + credits bucket
  *   - webhooks.test          → acknowledged, no DB write
  *
- * See docs-planning/SPEC.md Section 6 for the income_events schema.
+ * See docs-planning/SPEC.md Section 6 for the income_events / transfers schema.
  */
 
 import crypto from "crypto";
@@ -81,9 +82,9 @@ function requiresCctp(circleBlockchain: string | undefined): boolean {
 // ---------------------------------------------------------------------------
 
 async function verifyCircleSignature(
-  bodyString: string,
-  signature: string,
-  keyId: string
+    bodyString: string,
+    signature: string,
+    keyId: string
 ): Promise<boolean> {
   try {
     const publicKey = await getCirclePublicKey(keyId);
@@ -91,7 +92,7 @@ async function verifyCircleSignature(
     verifier.update(bodyString);
     verifier.end();
     const signatureUint8Array = Uint8Array.from(
-      Buffer.from(signature, "base64")
+        Buffer.from(signature, "base64")
     );
     return verifier.verify(publicKey, signatureUint8Array);
   } catch (e) {
@@ -105,14 +106,14 @@ async function getCirclePublicKey(keyId: string) {
     throw new Error("Circle API key is not set");
   }
   const response = await fetch(
-    `https://api.circle.com/v2/notifications/publicKey/${keyId}`,
-    {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.CIRCLE_API_KEY}`,
-      },
-    }
+      `https://api.circle.com/v2/notifications/publicKey/${keyId}`,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${process.env.CIRCLE_API_KEY}`,
+        },
+      }
   );
   if (!response.ok) {
     throw new Error(`Failed to fetch public key: ${response.statusText}`);
@@ -144,27 +145,27 @@ async function getCirclePublicKey(keyId: string) {
  *   - We've already processed this tx_hash (dedupe)
  */
 async function handleInboundTransfer(
-  notification: CircleNotification
+    notification: CircleNotification
 ): Promise<void> {
   const mainWalletId = process.env.STOREHOUSE_MAIN_WALLET_ID;
   const mainWalletAddress = process.env.STOREHOUSE_MAIN_WALLET_ADDRESS;
 
   if (!mainWalletId || !mainWalletAddress) {
     console.error(
-      "STOREHOUSE_MAIN_WALLET_ID or STOREHOUSE_MAIN_WALLET_ADDRESS not set in env"
+        "STOREHOUSE_MAIN_WALLET_ID or STOREHOUSE_MAIN_WALLET_ADDRESS not set in env"
     );
     return;
   }
 
   // Filter: only process transfers TO storehouse-main
   const isToMainWallet =
-    notification.walletId === mainWalletId ||
-    notification.destinationAddress?.toLowerCase() ===
+      notification.walletId === mainWalletId ||
+      notification.destinationAddress?.toLowerCase() ===
       mainWalletAddress.toLowerCase();
 
   if (!isToMainWallet) {
     console.log(
-      `Webhook: transfer to ${notification.walletId ?? notification.destinationAddress} — not storehouse-main, ignoring`
+        `Webhook: transfer to ${notification.walletId ?? notification.destinationAddress} — not storehouse-main, ignoring`
     );
     return;
   }
@@ -196,32 +197,32 @@ async function handleInboundTransfer(
 
   // Dedupe: check if we've already created an income_event for this tx
   const { data: existing } = await supabaseAdminClient
-    .from("income_events")
-    .select("id")
-    .eq("source_tx_hash", txHash)
-    .maybeSingle();
+      .from("income_events")
+      .select("id")
+      .eq("source_tx_hash", txHash)
+      .maybeSingle();
 
   if (existing) {
     console.log(
-      `Webhook: income_event already exists for tx ${txHash.slice(0, 10)}... — skipping`
+        `Webhook: income_event already exists for tx ${txHash.slice(0, 10)}... — skipping`
     );
     return;
   }
 
   // Create the income_event row
   const { data: incomeEvent, error } = await supabaseAdminClient
-    .from("income_events")
-    .insert({
-      source_tx_hash: txHash,
-      source_address: notification.sourceAddress ?? "unknown",
-      source_chain: sourceChain,
-      amount: amountUsdc,
-      cctp_required: cctpRequired,
-      received_at: new Date().toISOString(),
-      status: cctpRequired ? "bridging" : "arrived_on_arc",
-    })
-    .select("id")
-    .single();
+      .from("income_events")
+      .insert({
+        source_tx_hash: txHash,
+        source_address: notification.sourceAddress ?? "unknown",
+        source_chain: sourceChain,
+        amount: amountUsdc,
+        cctp_required: cctpRequired,
+        received_at: new Date().toISOString(),
+        status: cctpRequired ? "bridging" : "arrived_on_arc",
+      })
+      .select("id")
+      .single();
 
   if (error) {
     console.error("Failed to create income_event:", error.message);
@@ -229,8 +230,89 @@ async function handleInboundTransfer(
   }
 
   console.log(
-    `✓ income_event created: id=${incomeEvent.id} amount=${amountUsdc} USDC chain=${sourceChain} cctp=${cctpRequired}`
+      `✓ income_event created: id=${incomeEvent.id} amount=${amountUsdc} USDC chain=${sourceChain} cctp=${cctpRequired}`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Outbound confirmation → bucket credit
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles an outbound transfer confirmation.
+ *
+ * notification.id corresponds to transfers.circle_transaction_id (verified
+ * against live Circle payloads). On state=COMPLETE, calls confirm_transfer(),
+ * which idempotently marks the matching transfers row 'confirmed' and credits
+ * its obligation's bucket in a single transaction. Circle re-deliveries are
+ * no-ops (the function returns false and moves nothing).
+ *
+ * On a terminal failure state, marks the transfer 'failed' (never un-crediting
+ * an already-confirmed transfer).
+ */
+async function handleOutboundConfirmation(
+    notification: CircleNotification
+): Promise<void> {
+  const circleTxId = notification.id;
+  const state = notification.state;
+
+  if (!circleTxId) {
+    console.warn("Webhook: outbound notification has no id, ignoring");
+    return;
+  }
+
+  // Terminal failure — mark the transfer failed, do not credit.
+  if (state === "FAILED" || state === "CANCELLED") {
+    const { error } = await supabaseAdminClient
+        .from("transfers")
+        .update({ status: "failed" })
+        .eq("circle_transaction_id", circleTxId)
+        .neq("status", "confirmed");
+    if (error) {
+      console.error(
+          `Webhook: failed to mark transfer failed (${circleTxId.slice(0, 8)}...):`,
+          error.message
+      );
+    } else {
+      console.log(
+          `Webhook: outbound ${circleTxId.slice(0, 8)}... marked failed (state=${state})`
+      );
+    }
+    return;
+  }
+
+  // Only confirm on a terminal success state.
+  if (state !== "COMPLETE") {
+    console.log(
+        `Webhook: outbound ${circleTxId.slice(0, 8)}... state=${state}, no action`
+    );
+    return;
+  }
+
+  const txHash = notification.txHash ?? null;
+
+  const { data, error } = await supabaseAdminClient.rpc("confirm_transfer", {
+    p_circle_transaction_id: circleTxId,
+    p_tx_hash: txHash,
+  });
+
+  if (error) {
+    console.error(
+        `Webhook: confirm_transfer failed for ${circleTxId.slice(0, 8)}...:`,
+        error.message
+    );
+    return;
+  }
+
+  if (data === true) {
+    console.log(
+        `✓ Webhook: transfer ${circleTxId.slice(0, 8)}... confirmed, bucket credited`
+    );
+  } else {
+    console.log(
+        `Webhook: transfer ${circleTxId.slice(0, 8)}... already confirmed (no-op)`
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -244,8 +326,8 @@ export async function POST(req: NextRequest) {
 
     if (!signature || !keyId) {
       return NextResponse.json(
-        { error: "Missing signature or keyId in headers" },
-        { status: 400 }
+          { error: "Missing signature or keyId in headers" },
+          { status: 400 }
       );
     }
 
@@ -266,8 +348,8 @@ export async function POST(req: NextRequest) {
 
     if (!body.subscriptionId || !body.notificationId || !body.notificationType) {
       return NextResponse.json(
-        { error: "Malformed webhook payload — missing required fields" },
-        { status: 422 }
+          { error: "Malformed webhook payload — missing required fields" },
+          { status: 422 }
       );
     }
 
@@ -283,25 +365,22 @@ export async function POST(req: NextRequest) {
 
     if (!notification) {
       return NextResponse.json(
-        { error: "Malformed notification payload" },
-        { status: 422 }
+          { error: "Malformed notification payload" },
+          { status: 422 }
       );
     }
 
     // Handle inbound transfers — these become income_events
     if (
-      notificationType === "transactions.inbound" ||
-      (notificationType === "transactions" && notification.state === "COMPLETE")
+        notificationType === "transactions.inbound" ||
+        (notificationType === "transactions" && notification.state === "COMPLETE")
     ) {
       await handleInboundTransfer(notification);
     }
 
-    // Outbound transfers (routing agent's transfers firing) — no action needed
-    // here; the executor polls Circle directly for status updates.
+    // Handle outbound confirmations — mark transfer confirmed + credit bucket
     if (notificationType === "transactions.outbound") {
-      console.log(
-        `Outbound transfer notification: id=${notification.id} state=${notification.state} — handled by executor`
-      );
+      await handleOutboundConfirmation(notification);
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
@@ -309,8 +388,8 @@ export async function POST(req: NextRequest) {
     console.error("Failed to process Circle webhook:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: `Failed to process notification: ${message}` },
-      { status: 500 }
+        { error: `Failed to process notification: ${message}` },
+        { status: 500 }
     );
   }
 }
