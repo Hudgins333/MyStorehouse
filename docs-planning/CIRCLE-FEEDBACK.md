@@ -140,3 +140,48 @@ Do not append /rest/v1/, /auth/v1/, or any path suffix.
 Add URL validation to the Supabase client initialization that checks for
 and warns on trailing path segments. A simple check for '/rest' or '/auth'
 in the URL before client creation would catch this immediately.
+
+## App Kit Swap: cirBTC documented + faucetable on Arc Testnet, but no swap route
+
+**Severity:** Medium (documented capability not deployable)
+**Date:** 2026-06-13
+**Environment:** Arc Testnet, App Kit Swap (`@circle-fin/app-kit` + `@circle-fin/adapter-circle-wallets`), Developer-Controlled Wallets
+
+### What happened
+
+App Kit Swap docs state: "Among testnets, only Arc Testnet supports Swap
+(USDC, EURC, and cirBTC only)." cirBTC is also claimable from the Circle
+faucet. However, `estimateSwap` for USDC -> cirBTC on Arc Testnet fails with:
+
+INPUT_UNSUPPORTED_ROUTE (code 331001): "No route available"
+
+The same call signing through the same Circle developer-controlled wallet on
+the same chain succeeds for USDC -> EURC, returning a valid quote
+(estimatedOutput, stopLimit, itemized provider + gas fees). So the failure is
+specific to the cirBTC route, not the integration, wallet, chain, or kit setup.
+
+### Controlled comparison (same wallet, same chain, same call)
+
+- USDC -> EURC: ✓ quote returned (e.g. 0.10 USDC -> ~0.0989 EURC)
+- USDC -> cirBTC: ✗ 331001 "No route available"
+
+### Why it matters
+
+cirBTC is documented as a supported Arc Testnet swap token and is faucetable,
+which signals to developers that USDC<->cirBTC swaps are available. They are
+not currently routable via the Stablecoin Service. This is a gap between
+documented/faucetable capability and deployed routing — a developer building
+against cirBTC would only discover it at swap time.
+
+### Suggested improvements
+
+- Either enable the USDC<->cirBTC route on Arc Testnet, or update the Swap docs
+  to note cirBTC routing is not yet live on testnet.
+- Where a token is faucetable but not yet swap-routable, surface that distinction
+  (the faucet implies more capability than currently exists).
+
+### Repro
+
+`scripts/swap-probe.ts` in this repo runs `estimateSwap` for a configurable
+`tokenOut` on Arc Testnet via a Circle-wallets adapter. Set tokenOut to "cirBTC"
+to reproduce the 331001; "EURC" returns a valid quote.
