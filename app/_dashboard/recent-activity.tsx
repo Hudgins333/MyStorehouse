@@ -6,6 +6,7 @@
  *   - How the Classifier labeled it (type, confidence, reasoning)
  *   - What the Router decided (allocation summary, reasoning)
  *   - Execution state (submitted / pending / failed)
+ *   - Any savings diversification swap (USDC -> EURC) that followed
  *
  * This is the "watch Storehouse think" view. Most interesting section in a
  * demo because it shows the audit trail in plain English.
@@ -46,11 +47,22 @@ interface Transfer {
     status: string;
 }
 
+interface Swap {
+    id: string;
+    transfer_id: string;
+    token_in: string;
+    token_out: string;
+    amount_in: string;
+    amount_out: string | null;
+    status: string;
+}
+
 async function loadActivityData(): Promise<{
     events: IncomeEvent[];
     decisionsByEvent: Map<string, RoutingDecision>;
     transfersByDecision: Map<string, Transfer[]>;
     obligationNames: Map<string, string>;
+    swapsByDecision: Map<string, Swap[]>;
 }> {
     // Get recent income events
     const { data: events } = await supabaseAdminClient
@@ -96,6 +108,30 @@ async function loadActivityData(): Promise<{
         transfersByDecision.set(t.routing_decision_id, list);
     }
 
+    // Get swaps that followed any of these transfers, keyed back to the decision
+    // via the transfer they belong to. Build transfer_id -> decision_id first.
+    const transferToDecision = new Map<string, string>();
+    for (const t of transfers) {
+        transferToDecision.set(t.id, t.routing_decision_id);
+    }
+
+    const swapsByDecision = new Map<string, Swap[]>();
+    const transferIds = transfers.map((t) => t.id);
+    if (transferIds.length > 0) {
+        const { data } = await supabaseAdminClient
+            .from("swaps")
+            .select("id, transfer_id, token_in, token_out, amount_in, amount_out, status")
+            .in("transfer_id", transferIds)
+            .eq("status", "executed");
+        for (const s of (data ?? []) as Swap[]) {
+            const decId = transferToDecision.get(s.transfer_id);
+            if (!decId) continue;
+            const list = swapsByDecision.get(decId) ?? [];
+            list.push(s);
+            swapsByDecision.set(decId, list);
+        }
+    }
+
     // Get obligation names referenced by any transfer
     const obligationIds = Array.from(
         new Set(transfers.map((t) => t.obligation_id))
@@ -111,7 +147,13 @@ async function loadActivityData(): Promise<{
         }
     }
 
-    return { events: eventList, decisionsByEvent, transfersByDecision, obligationNames };
+    return {
+        events: eventList,
+        decisionsByEvent,
+        transfersByDecision,
+        obligationNames,
+        swapsByDecision,
+    };
 }
 
 function relativeTime(iso: string): string {
@@ -139,8 +181,13 @@ function classificationBadgeVariant(
 }
 
 export async function RecentActivity() {
-    const { events, decisionsByEvent, transfersByDecision, obligationNames } =
-        await loadActivityData();
+    const {
+        events,
+        decisionsByEvent,
+        transfersByDecision,
+        obligationNames,
+        swapsByDecision,
+    } = await loadActivityData();
 
     return (
         <Card>
@@ -158,6 +205,9 @@ export async function RecentActivity() {
                             const decision = decisionsByEvent.get(event.id);
                             const transfers = decision
                                 ? transfersByDecision.get(decision.id) ?? []
+                                : [];
+                            const swaps = decision
+                                ? swapsByDecision.get(decision.id) ?? []
                                 : [];
 
                             return (
@@ -229,6 +279,30 @@ export async function RecentActivity() {
                                                     </div>
                                                 ))}
                                             </div>
+
+                                            {/* Savings diversification swap(s) */}
+                                            {swaps.map((s) => (
+                                                <div
+                                                    key={s.id}
+                                                    className="text-xs text-muted-foreground mb-2 flex items-center gap-1"
+                                                >
+                                                    <span>↳ Diversified savings:</span>
+                                                    <span className="font-medium text-foreground">
+                            {parseFloat(s.amount_in).toFixed(2)} {s.token_in}
+                          </span>
+                                                    <span>→</span>
+                                                    <span className="font-medium text-foreground">
+                            {s.amount_out
+                                ? parseFloat(s.amount_out).toFixed(2)
+                                : "?"}{" "}
+                                                        {s.token_out}
+                          </span>
+                                                    <Badge variant="outline" className="ml-1 text-[10px]">
+                                                        swap
+                                                    </Badge>
+                                                </div>
+                                            ))}
+
                                             {decision.llm_reasoning ? (
                                                 <div className="text-xs text-muted-foreground italic">
                                                     "{decision.llm_reasoning}"
