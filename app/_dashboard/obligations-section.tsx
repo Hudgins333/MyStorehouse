@@ -2,15 +2,13 @@
  * Storehouse — Obligations Section (Server Component)
  *
  * Displays the user's active obligations as a table, with each obligation's
- * current bucket balance. Bucket balance comes from the DB, not from Circle —
- * this represents what Storehouse has *successfully routed* to that bucket
- * (i.e. confirmed transfers only, when confirmation webhook is implemented).
+ * routed bucket balance. Bucket balance comes from the DB (confirmed transfers
+ * credited via confirm_transfer), not from Circle directly.
  *
- * For today (pre-confirmation-webhook), buckets.current_balance is whatever
- * the executor wrote on each routing. May not match on-chain reality if any
- * transfers failed post-submit. That gap closes in the next session.
+ * The savings obligation additionally shows its dual-asset composition: half of
+ * each confirmed savings deposit is swapped USDC -> EURC (see lib/agents/swapper),
+ * so its row breaks out how much remains liquid USDC vs. how much became EURC.
  */
-
 import { supabaseAdminClient } from "@/lib/supabase/admin-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -23,6 +21,9 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 
+// The savings obligation — the one with the USDC -> EURC diversification swap.
+const SAVINGS_OBLIGATION_ID = "de1c6c24-3e66-4738-a7d7-4cc6e7d4e3d4";
+
 interface ObligationWithBucket {
     id: string;
     name: string;
@@ -32,6 +33,12 @@ interface ObligationWithBucket {
     destination_type: "onchain" | "fiat_offramp";
     due_date: string | null;
     current_balance: string;
+}
+
+interface SavingsSwapSummary {
+    usdcSwapped: number; // total USDC converted out
+    eurcReceived: number; // total EURC received
+    swapCount: number;
 }
 
 async function loadObligationsWithBuckets(): Promise<ObligationWithBucket[]> {
@@ -51,11 +58,9 @@ async function loadObligationsWithBuckets(): Promise<ObligationWithBucket[]> {
         )
         .eq("active", true)
         .order("priority", { ascending: true });
-
     if (error || !data) {
         return [];
     }
-
     return data.map((row: any) => ({
         id: row.id,
         name: row.name,
@@ -70,6 +75,27 @@ async function loadObligationsWithBuckets(): Promise<ObligationWithBucket[]> {
                 : row.buckets?.current_balance) ?? "0"
         ),
     }));
+}
+
+async function loadSavingsSwapSummary(): Promise<SavingsSwapSummary> {
+    const { data, error } = await supabaseAdminClient
+        .from("swaps")
+        .select("amount_in, amount_out, status")
+        .eq("obligation_id", SAVINGS_OBLIGATION_ID)
+        .eq("status", "executed");
+
+    if (error || !data) {
+        return { usdcSwapped: 0, eurcReceived: 0, swapCount: 0 };
+    }
+
+    return data.reduce<SavingsSwapSummary>(
+        (acc, row: any) => ({
+            usdcSwapped: acc.usdcSwapped + parseFloat(row.amount_in ?? "0"),
+            eurcReceived: acc.eurcReceived + parseFloat(row.amount_out ?? "0"),
+            swapCount: acc.swapCount + 1,
+        }),
+        { usdcSwapped: 0, eurcReceived: 0, swapCount: 0 }
+    );
 }
 
 function formatObligationAmount(o: ObligationWithBucket): string {
@@ -92,8 +118,18 @@ function formatBucketBalance(b: string): string {
     });
 }
 
+function formatAmount(n: number): string {
+    return n.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
 export async function ObligationsSection() {
-    const obligations = await loadObligationsWithBuckets();
+    const [obligations, savingsSwaps] = await Promise.all([
+        loadObligationsWithBuckets(),
+        loadSavingsSwapSummary(),
+    ]);
 
     return (
         <Card>
@@ -118,34 +154,48 @@ export async function ObligationsSection() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {obligations.map((o) => (
-                                <TableRow key={o.id}>
-                                    <TableCell className="text-muted-foreground">
-                                        {o.priority}
-                                    </TableCell>
-                                    <TableCell className="font-medium">{o.name}</TableCell>
-                                    <TableCell>
-                                        <Badge variant="outline" className="capitalize">
-                                            {o.type}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell>{formatObligationAmount(o)}</TableCell>
-                                    <TableCell>
-                                        <Badge
-                                            variant={
-                                                o.destination_type === "onchain"
-                                                    ? "default"
-                                                    : "secondary"
-                                            }
-                                        >
-                                            {o.destination_type === "onchain" ? "onchain" : "fiat"}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right font-mono">
-                                        ${formatBucketBalance(o.current_balance)}
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                            {obligations.map((o) => {
+                                const isSavings =
+                                    o.id === SAVINGS_OBLIGATION_ID &&
+                                    savingsSwaps.swapCount > 0;
+                                const liquidUsdc =
+                                    parseFloat(o.current_balance) - savingsSwaps.usdcSwapped;
+
+                                return (
+                                    <TableRow key={o.id}>
+                                        <TableCell className="text-muted-foreground">
+                                            {o.priority}
+                                        </TableCell>
+                                        <TableCell className="font-medium">{o.name}</TableCell>
+                                        <TableCell>
+                                            <Badge variant="outline" className="capitalize">
+                                                {o.type}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell>{formatObligationAmount(o)}</TableCell>
+                                        <TableCell>
+                                            <Badge
+                                                variant={
+                                                    o.destination_type === "onchain"
+                                                        ? "default"
+                                                        : "secondary"
+                                                }
+                                            >
+                                                {o.destination_type === "onchain" ? "onchain" : "fiat"}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right font-mono">
+                                            <div>${formatBucketBalance(o.current_balance)}</div>
+                                            {isSavings && (
+                                                <div className="text-xs text-muted-foreground mt-0.5">
+                                                    ↳ {formatAmount(Math.max(liquidUsdc, 0))} USDC ·{" "}
+                                                    {formatAmount(savingsSwaps.eurcReceived)} EURC
+                                                </div>
+                                            )}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })}
                         </TableBody>
                     </Table>
                 )}
