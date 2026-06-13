@@ -284,6 +284,18 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 - **Storehouse repo:** https://github.com/Hudgins333/storehouse (this repo)
 - **Ignyte challenge:** https://app.ignyte.ae/public/challenges/4B436318-C737-F111-9A49-6045BD14D400
 
+## Pre-Production Hardening (deferred — must close before real customers)
+
+These are acceptable on single-user testnet but are blockers for any multi-user
+or mainnet deployment:
+
+- **Row Level Security (RLS) not enabled on Supabase tables.** The app accesses
+  Postgres via the service key (which bypasses RLS), so this doesn't affect
+  Storehouse's own operation. But anon/authenticated keys can currently read
+  tables (e.g. `swaps`, `transfers`, `income_events`). Before multi-user:
+  enable RLS on all tables and add per-user access policies. v1 tables were
+  created service-key-only with RLS deferred for testnet speed.
+- *(add future pre-prod items here)*
 --
 
 Glory to King Jesus!
