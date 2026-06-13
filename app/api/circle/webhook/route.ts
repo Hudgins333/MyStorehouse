@@ -26,6 +26,7 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdminClient } from "@/lib/supabase/admin-client";
 import { runPipeline } from "@/lib/agents/pipeline";
+import { swapSavingsHalf } from "@/lib/agents/swapper";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -313,6 +314,24 @@ async function handleOutboundConfirmation(
     console.log(
         `✓ Webhook: transfer ${circleTxId.slice(0, 8)}... confirmed, bucket credited`
     );
+
+    // If this was the savings transfer, swap half USDC -> EURC.
+    // Load the transfer row to get its amount + obligation, then fire the
+    // swap detached (never blocks the webhook; never throws).
+    const { data: transferRow } = await supabaseAdminClient
+        .from("transfers")
+        .select("id, obligation_id, amount, circle_transaction_id")
+        .eq("circle_transaction_id", circleTxId)
+        .single();
+
+    if (transferRow) {
+      swapSavingsHalf(transferRow).catch((e) => {
+        console.error(
+            `Savings swap crashed for ${circleTxId.slice(0, 8)}...:`,
+            e instanceof Error ? e.message : String(e)
+        );
+      });
+    }
   } else {
     console.log(
         `Webhook: transfer ${circleTxId.slice(0, 8)}... already confirmed (no-op)`
