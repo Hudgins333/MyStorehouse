@@ -2,19 +2,20 @@
  * Storehouse — Circle webhook handler
  *
  * Receives Circle transaction notifications. Inbound transfers to
- * storehouse-main become income_events; outbound transfer confirmations
- * drive the bucket-credit loop via confirm_transfer(). The handler is a
- * receiver only — it captures events and returns 200 immediately.
+ * storehouse-main become income_events and auto-trigger the pipeline
+ * (classify -> route -> execute); outbound transfer confirmations drive the
+ * bucket-credit loop via confirm_transfer(). The handler returns 200
+ * immediately and runs the pipeline detached.
  *
  * Circle webhook flow:
  *   1. Circle POSTs a signed notification to this endpoint
  *   2. We verify the signature against Circle's public key
- *   3. inbound to storehouse-main  → create income_event
+ *   3. inbound to storehouse-main  → create income_event, fire pipeline
  *      outbound COMPLETE           → confirm_transfer (mark confirmed, credit bucket)
  *   4. Return 200 immediately (Circle retries on non-200)
  *
  * Supported notification types:
- *   - transactions.inbound   → creates income_event (status from cctp flag)
+ *   - transactions.inbound   → creates income_event, auto-runs pipeline
  *   - transactions.outbound  → on COMPLETE, confirms transfer + credits bucket
  *   - webhooks.test          → acknowledged, no DB write
  *
@@ -24,6 +25,7 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdminClient } from "@/lib/supabase/admin-client";
+import { runPipeline } from "@/lib/agents/pipeline";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,17 +138,17 @@ async function getCirclePublicKey(keyId: string) {
 
 /**
  * Handles an inbound USDC transfer notification.
- * Creates an income_event row with status 'pending' for the routing agent
+ * Creates an income_event row (status from the cctp flag) for the pipeline
  * to pick up and classify.
  *
- * Returns early (no DB write) if:
- *   - The transfer is not to storehouse-main
- *   - The amounts array is empty or zero
- *   - We've already processed this tx_hash (dedupe)
+ * Returns the new income_event id when the event is ready to route (arrived
+ * on Arc, not bridging); returns null when no event was created or when the
+ * event still needs CCTP bridging (so the caller does not auto-run the
+ * pipeline prematurely).
  */
 async function handleInboundTransfer(
     notification: CircleNotification
-): Promise<void> {
+): Promise<string | null> {
   const mainWalletId = process.env.STOREHOUSE_MAIN_WALLET_ID;
   const mainWalletAddress = process.env.STOREHOUSE_MAIN_WALLET_ADDRESS;
 
@@ -154,7 +156,7 @@ async function handleInboundTransfer(
     console.error(
         "STOREHOUSE_MAIN_WALLET_ID or STOREHOUSE_MAIN_WALLET_ADDRESS not set in env"
     );
-    return;
+    return null;
   }
 
   // Filter: only process transfers TO storehouse-main
@@ -167,14 +169,14 @@ async function handleInboundTransfer(
     console.log(
         `Webhook: transfer to ${notification.walletId ?? notification.destinationAddress} — not storehouse-main, ignoring`
     );
-    return;
+    return null;
   }
 
   // Extract amount from Circle's amounts array (index 0 is the transfer amount)
   const rawAmount = notification.amounts?.[0];
   if (!rawAmount) {
     console.warn("Webhook: inbound transfer has no amounts, ignoring");
-    return;
+    return null;
   }
 
   // Circle amounts are in the token's smallest unit (USDC = 6 decimals)
@@ -183,13 +185,13 @@ async function handleInboundTransfer(
 
   if (parseFloat(amountUsdc) <= 0) {
     console.warn(`Webhook: zero-amount transfer, ignoring`);
-    return;
+    return null;
   }
 
   const txHash = notification.txHash;
   if (!txHash) {
     console.warn("Webhook: inbound transfer has no txHash, ignoring");
-    return;
+    return null;
   }
 
   const sourceChain = normalizeChain(notification.blockchain);
@@ -206,7 +208,7 @@ async function handleInboundTransfer(
     console.log(
         `Webhook: income_event already exists for tx ${txHash.slice(0, 10)}... — skipping`
     );
-    return;
+    return null;
   }
 
   // Create the income_event row
@@ -226,12 +228,15 @@ async function handleInboundTransfer(
 
   if (error) {
     console.error("Failed to create income_event:", error.message);
-    return;
+    return null;
   }
 
   console.log(
       `✓ income_event created: id=${incomeEvent.id} amount=${amountUsdc} USDC chain=${sourceChain} cctp=${cctpRequired}`
   );
+
+  // Only auto-run the pipeline for events already on Arc (not awaiting CCTP).
+  return cctpRequired ? null : incomeEvent.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,12 +375,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Handle inbound transfers — these become income_events
+    // Handle inbound transfers — create income_event and auto-run the pipeline
     if (
         notificationType === "transactions.inbound" ||
         (notificationType === "transactions" && notification.state === "COMPLETE")
     ) {
-      await handleInboundTransfer(notification);
+      const newEventId = await handleInboundTransfer(notification);
+
+      // Fire-and-forget: kick off classify -> route -> execute without blocking
+      // the 200. Circle needs a fast ack; the pipeline runs detached and never
+      // throws. We intentionally do NOT await this.
+      if (newEventId) {
+        runPipeline(newEventId).catch((e) => {
+          console.error(
+              `Pipeline crashed for ${newEventId}:`,
+              e instanceof Error ? e.message : String(e)
+          );
+        });
+      }
     }
 
     // Handle outbound confirmations — mark transfer confirmed + credit bucket
