@@ -20,7 +20,7 @@ async function transfer() {
     walletId: fromWalletId,
     tokenId: usdcTokenId,
     destinationAddress: toAddress,
-    amounts: ["1"],
+    amount: ["1"],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
 
