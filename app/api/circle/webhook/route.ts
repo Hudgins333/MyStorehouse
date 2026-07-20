@@ -348,11 +348,12 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get("x-circle-signature");
     const keyId = req.headers.get("x-circle-key-id");
 
+    // Connection/liveness probes arrive unsigned. Acknowledge them so the
+    // subscription can activate, but do not parse or process the body —
+    // nothing unsigned ever reaches the pipeline.
     if (!signature || !keyId) {
-      return NextResponse.json(
-          { error: "Missing signature or keyId in headers" },
-          { status: 400 }
-      );
+      console.log("Circle webhook: unsigned probe acknowledged (not processed)");
+      return NextResponse.json({ received: true }, { status: 200 });
     }
 
     const rawBody = await req.text();
@@ -431,9 +432,9 @@ export async function POST(req: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-// HEAD handler — Circle pings this to verify endpoint liveness
+// GET — liveness probe. Next.js derives HEAD from GET, so this covers both.
 // ---------------------------------------------------------------------------
 
-export async function HEAD() {
-  return NextResponse.json({}, { status: 200 });
+export async function GET() {
+  return NextResponse.json({ status: "ok" }, { status: 200 });
 }
