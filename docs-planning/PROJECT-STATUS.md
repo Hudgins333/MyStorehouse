@@ -95,7 +95,7 @@ All wallet IDs and addresses stored in 1Password under `Storehouse Wallets — A
 
 **Crossmint staging:** self-serve signup verified, server-side API key in hand. Direct test of the Create Order endpoint (`POST /api/2022-06-09/orders`) returned the expected validation error (`recipient.bankAccountId` and `payment.receiptEmail` required), confirming the offramp endpoint is open to the staging key. Base Sepolia is accepted as a source chain; Arc is not (enum-rejected at validator level). Bank account registration on staging is not exposed in the console UI — email sent to Crossmint CSE on May 24 requesting either a self-serve path or a sandbox `bankAccountId` registration. Awaiting response.
 
-**Bridge.xyz:** initial application as individual was rejected. Reapplication as Drop2Wave Capital LLC is in progress — virtual conversation scheduled May 25 at 10:15 AM. Goals: establish credibility with LLC framing, learn realistic sandbox approval timeline, ask about multi-tenant pattern for Phase 2.
+**Bridge.xyz:** initial application as an individual was rejected; reapplication under a business entity is in progress. The individual-vs-entity classification appears to be the gating factor — worth noting for any builder evaluating this rail.
 
 **Cybrid:** abandoned (no response 24+ hours after sandbox application; their go-to-market is enterprise sales).
 
