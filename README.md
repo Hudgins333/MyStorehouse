@@ -1,161 +1,126 @@
-# Arc Commerce
+<p align="center">
+  <img src="public/storehouse-emblem.png" alt="Storehouse" width="420" />
+</p>
 
-Integrate USDC as a payment method for purchasing credits on Arc. This sample application uses Next.js, Supabase, and Circle Developer Controlled Wallets to demonstrate a credit purchase flow with USDC payments on Arc testnet.
+<p align="center">
+  <em>"Bring the whole tithe into the storehouse, that there may be food in my house."</em><br />
+  — Malachi 3:10
+</p>
 
-<img width="830" height="646" alt="User dashboard for credit purchase" src="public/screenshot.png" />
+---
 
-## Table of Contents
+# Storehouse
 
-- [Prerequisites](#prerequisites)
-- [Clone and Run Locally](#clone-and-run-locally)
-- [Environment Variables](#environment-variables)
-- [User Accounts](#user-accounts)
+**An autonomous stablecoin stewardship agent on Arc.**
 
-## Prerequisites
+When USDC arrives, Storehouse reasons about where it belongs. It classifies the income, allocates it across a household's registered financial obligations — tithe, tax escrow, savings, operating remainder — executes the transfers on-chain, and explains every decision in plain English.
 
-- **Node.js v22+** — Install via [nvm](https://github.com/nvm-sh/nvm) (`nvm use` will read the `.nvmrc` file)
-- **Supabase CLI** — Install via `npm install -g supabase` or see [Supabase CLI docs](https://supabase.com/docs/guides/cli/getting-started)
-- **Docker Desktop** (only if using the local Supabase path) — [Install Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- **[ngrok](https://ngrok.com/)** - for local webhook testing)
-- Circle Developer Controlled Wallets **[API key](https://console.circle.com/signin)** and **[Entity Secret](https://developers.circle.com/wallets/dev-controlled/register-entity-secret)**
+Live on Arc Testnet: **[mystorehouse.ai](https://mystorehouse.ai)**
 
-## Getting Started
+---
 
-1. Clone the repository and install dependencies:
+## The problem
 
-   ```bash
-   git clone git@github.com:circlefin/arc-commerce.git
-   cd arc-commerce
-   npm install
-   ```
+Most people intend to be disciplined with money. Set aside the tithe. Reserve for taxes. Fund savings before spending. The intent survives until the money lands in one undifferentiated balance and gets spent on whatever came first.
 
-2. Set up the database — Choose one of the two paths below:
+Traditional automation handles this with fixed rules — move $X on the 1st. That breaks the moment income is irregular, or an obligation changes, or the split needs judgment rather than arithmetic.
 
-   <details>
-   <summary><strong>Path 1: Local Supabase (Docker)</strong></summary>
+Storehouse treats allocation as a **reasoning** problem. An LLM classifies each inbound payment against the user's declared obligations and proposes a routing plan; deterministic code validates that plan against hard constraints before anything moves. The agent explains what it did and why, in language a person can actually audit.
 
-   Requires Docker Desktop installed and running.
+## How it works
 
-   ```bash
-   npx supabase start
-   npx supabase migration up
-   ```
-
-   The output of `npx supabase start` will display the Supabase URL and API keys needed in the next step.
-
-   </details>
-
-   <details>
-   <summary><strong>Path 2: Remote Supabase (Cloud)</strong></summary>
-
-   Requires a [Supabase](https://supabase.com/) account and project.
-
-   ```bash
-   npx supabase link --project-ref <your-project-ref>
-   npx supabase db push
-   ```
-
-   Retrieve your project URL and API keys from the Supabase dashboard under **Settings → API**.
-
-   </details>
-
-3. Set up environment variables:
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-   Then edit `.env.local` and fill in all required values. Use the Supabase URL and keys from the previous step's output (see [Environment Variables](#environment-variables) section below).
-
-4. Start the development server:
-
-   ```bash
-   npm run dev
-   ```
-
-   The app will be available at `http://localhost:3000`. The admin wallet is automatically created on first startup.
-
-5. Set up Circle Webhooks (for local development):
-
-   In a separate terminal, expose your local server:
-
-   ```bash
-   ngrok http 3000
-   ```
-
-   Copy the HTTPS URL from ngrok (e.g., `https://your-ngrok-url.ngrok.io`) and add it to your Circle Console webhooks section:
-   - Navigate to Circle Console → Webhooks
-   - Add a new webhook endpoint: `https://your-ngrok-url.ngrok.io/api/circle/webhook`
-   - Keep ngrok running while developing to receive webhook events
-
-## How It Works
-
-- Built with [Next.js](https://nextjs.org/) and [Supabase](https://supabase.com/)
-- Uses [Circle Developer Controlled Wallets](https://developers.circle.com/wallets/dev-controlled) for USDC transactions
-- Wallet operations handled server-side with `@circle-fin/developer-controlled-wallets`
-- Webhook signature verification ensures secure transaction notifications
-- Admin wallet automatically initialized on first run
-
-## Environment Variables
-
-Copy `.env.example` to `.env.local` and fill in the required values:
-
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY=
-SUPABASE_SECRET_KEY=
-
-# Circle
-CIRCLE_API_KEY=
-CIRCLE_ENTITY_SECRET=
-CIRCLE_BLOCKCHAIN=ARC-TESTNET
-CIRCLE_USDC_TOKEN_ID=
-
-# Misc
-ADMIN_EMAIL=admin@admin.com
+```
+Inbound USDC (Arc Testnet)
+        │
+        ▼
+Circle webhook  ──►  income event recorded
+        │
+        ▼
+Classification + routing  (Claude Haiku proposes)
+        │
+        ▼
+Validation  (deterministic code checks the plan)
+        │
+        ▼
+Execution  (Circle Developer-Controlled Wallets)
+        │
+        ├──► tithe        (10%)
+        ├──► tax escrow   (25%)  — capital-certainty constraints apply
+        ├──► savings      (10%)  — diversification leg: half swapped USDC→EURC
+        └──► operating    (remainder)
+        │
+        ▼
+Plain-English explanation written to the dashboard
 ```
 
-| Variable                              | Scope       | Purpose                                                                  |
-| ------------------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_SUPABASE_URL`            | Public      | Supabase project URL.                                                    |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY` | Public | Supabase anonymous/public key.                                           |
-| `SUPABASE_SECRET_KEY`           | Server-side | Secret key for privileged writes (e.g., transaction inserts).                  |
-| `CIRCLE_API_KEY`                      | Server-side | Used to fetch Circle webhook public keys for signature verification.     |
-| `CIRCLE_ENTITY_SECRET`                | Server-side | Circle entity secret for wallet operations.                              |
-| `CIRCLE_BLOCKCHAIN`                   | Server-side | Blockchain network identifier (e.g., "ARC-TESTNET").                     |
-| `CIRCLE_USDC_TOKEN_ID`                | Server-side | USDC token ID for the specified blockchain. Pre-filled for ARC-TESTNET.  |
-| `ADMIN_EMAIL`                         | Server-side | Admin user email address.                                                |
+**LLM proposes, code validates.** The model never has unilateral authority to move funds. It produces a routing proposal; validation logic enforces the invariants (allocations sum correctly, obligation ceilings respected, tax escrow never routed anywhere without instant withdrawability). A proposal that fails validation is rejected, not executed.
 
-## User Accounts
+## What's built
 
-### Admin Account
+- **Autonomous routing pipeline** — inbound USDC detected via verified Circle webhook, classified, allocated, and executed across five Developer-Controlled Wallets
+- **Savings diversification** — after the savings leg confirms, half is swapped USDC→EURC via Arc App Kit, logged, and surfaced on the dashboard. Fails safe to USDC.
+- **Plain-English decision log** — every routing decision is stored with its reasoning and rendered in a lifecycle view
+- **Dashboard** — obligations, bucket balances, and recent activity, deployed on Netlify at a custom domain
+- **`YieldProvider` interface** — swappable yield venues behind a common interface, so changing where a bucket earns is a configuration change rather than a rewrite. Tax escrow is pinned to `none` pending an instant-withdrawal guarantee.
+- **`OfframpAdapter` interface** — partner-agnostic fiat off-ramp abstraction, with adapter stubs written against Crossmint and Coinbase Business
 
-On first startup, an admin user is automatically created with the following credentials:
+## What's researched but not yet built
 
-- **Email:** `admin@admin.com`
-- **Password:** `123456`
+Being explicit about the line between shipped and designed:
 
-The admin account has access to the **Admin Dashboard**, which provides an overview of all users, wallets, and transactions in the system.
+- **Cross-chain yield routing.** Destination venues have been validated on-chain (not from documentation) and written up in [`docs-planning/`](docs-planning/) — which lending and liquidity venues are actually deployed, callable, and liquid on testnet, which are mainnet-only, and where bridged USDC is stranded. Execution of the cross-chain legs is in progress.
+- **Risk-graded routing.** The design: the user's risk appetite, captured during onboarding, selects which validated paths a bucket may route to, and any higher-risk selection requires an acknowledged, path-specific plain-English caution before it executes.
+- **Fiat off-ramp.** Architecture confirmed (Arc → CCTP → destination chain → off-ramp partner → ACH) behind the `OfframpAdapter`, with sandbox rails evaluated. Not yet wired end to end.
 
-Regular users who sign up will see the **User Dashboard**, which allows them to purchase credits with USDC and view their own transaction history.
+## Stack
 
-### Signup Rate Limits
+| | |
+|---|---|
+| Chain | Arc Testnet (Circle's stablecoin-native L1) |
+| Wallets | Circle Developer-Controlled Wallets |
+| Swaps | Arc App Kit (`@circle-fin/app-kit`) |
+| Cross-chain | CCTP / Gateway |
+| Reasoning | Claude (Haiku for classification and routing) |
+| App | Next.js 16, TypeScript |
+| State | Supabase (Postgres) |
+| Hosting | Netlify |
 
-Supabase limits email signups to **2 per hour** by default (unless custom SMTP is configured). If you hit an "email rate limit exceeded" error during testing:
+## Provenance
 
-- **Local Supabase (Docker):** Email verification is handled by the built-in [Inbucket](http://127.0.0.1:54324) mail server — check it to confirm signups. The rate limit can be adjusted in `supabase/config.toml` under `[auth.rate_limit]`.
-- **Remote Supabase (Cloud):** Use real email addresses (disposable emails may fail verification). If you hit the limit, you can manually add users via the Supabase dashboard under **Authentication → Users**.
-- `npm run dev`: Start Next.js development server with auto-reload
-- `npx supabase start`: Start local Supabase instance
-- `npx supabase migration up`: Apply database migrations
+Storehouse was scaffolded from a fork of [`circlefin/arc-commerce`](https://github.com/circlefin/arc-commerce), Circle's sample application, to start from working Circle SDK, Supabase, and webhook plumbing rather than rebuilding it. This is stated openly because it is an engineering decision, not something to obscure.
 
-## Security & Usage Model
+**Kept:** Circle SDK wrappers, Supabase client setup, webhook signature verification, Next.js configuration.
 
-This sample application:
-- Assumes testnet usage only
-- Handles secrets via environment variables
-- Verifies webhook signatures for security
-- Is not intended for production use without modification
+**Replaced:** the entire data model (obligations, buckets, routing decisions, income events — none of which existed upstream), the routing and reasoning layer, and the dashboard.
 
-See `SECURITY.md` for vulnerability reporting guidelines. Please report issues privately via Circle's bug bounty program.
+**Removed:** the commerce feature set — credit purchasing, admin dashboard, auth flows, and the unused UI component library that came with them. The husk removal was a single deliberate commit deleting roughly 8,000 lines.
+
+The commit history is intact from the fork forward and is meant to read as a record of construction.
+
+## Running locally
+
+```bash
+git clone https://github.com/Hudgins333/MyStorehouse.git
+cd MyStorehouse
+npm install
+cp .env.example .env.local   # fill in your own values
+npm run dev
+```
+
+Requires Node 22+ (`nvm use` reads `.nvmrc`), a Supabase project, and Circle Developer-Controlled Wallets credentials (API key + entity secret). Database migrations live in `supabase/`; apply with `npx supabase migration up` from the project root.
+
+For local webhook testing, expose the dev server with `ngrok http 3000` and register the HTTPS URL at Circle Console → Webhooks as `/api/circle/webhook`.
+
+## Documentation
+
+- [`docs-planning/PROJECT-STATUS.md`](docs-planning/PROJECT-STATUS.md) — build state, key decisions, and the reasoning behind them
+- [`CIRCLE-FEEDBACK.md`](docs-planning/CIRCLE-FEEDBACK.md) — a running log of real bugs and gaps encountered against Circle's developer tools, documented as they were found
+- [`scripts/`](scripts/) — on-chain probe scripts used to validate yield venues before committing build time to them
+
+## Status and scope
+
+Testnet only. Secrets are handled through environment variables. Webhook signatures are verified. This is a working prototype under active development and is not production software.
+
+---
+
+<p align="center"><em>To Christ be the Glory.</em></p>
