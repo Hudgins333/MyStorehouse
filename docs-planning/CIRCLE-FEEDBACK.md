@@ -56,6 +56,30 @@ Test the API key directly against a known endpoint rather than trusting that
 `fetch("https://api.circle.com/v1/w3s/wallets?pageSize=1", { headers: { Authorization: ` + "`Bearer ${CIRCLE_API_KEY}`" + ` }})`
 — a 200 confirms the key is valid for the account; a 401 means rotate/replace it.
 
+### Follow-up (2026-07-20): same symptom, different cause — IP allowlisting
+
+The identical failure chain reappeared after deploying to Netlify. This time the
+key was not stale: it returned 200 from a local machine against both
+`/v1/w3s/wallets` and the notifications publicKey endpoint, while the deployed
+serverless function got `401 Unauthorized` on every publicKey fetch and
+therefore returned 403 to every webhook.
+
+Cause: the API key had an **IP allowlist** restricting it to a single address.
+Serverless functions egress from rotating cloud IPs, so no request from the
+deployment could ever authenticate.
+
+This makes the diagnostic above unreliable for deployed environments — it
+passes precisely when it shouldn't, because it runs from the allowlisted IP.
+The key is valid; it is just not valid *from where the code runs*.
+
+Suggested improvements, in addition to those above:
+- When a request is rejected because of an IP allowlist, say so. `401 Invalid
+  credentials` is indistinguishable from a rotated key and sends developers
+  down the wrong path.
+- Surface an IP-restriction warning in the Console when a key with an allowlist
+  is used by a webhook subscriber, since webhook verification is inherently a
+  server-side call from wherever the endpoint is hosted.
+
 ---
 
 ## Outbound transaction notifications fire for every lifecycle state, not just terminal
