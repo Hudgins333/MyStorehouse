@@ -271,6 +271,9 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 | Cybrid abandoned (May 24) | 24+ hour sandbox-application silence + enterprise-sales GTM = wrong fit for solo developer track. |
 | Coinbase Business as safety net (May 24) | Sandbox validated, zero external dependencies. Used as v1 rail until Crossmint or Bridge converts. |
 | Arc not source chain for offramp (May 24) | Verified by direct API test: Crossmint validator rejects `arc-testnet` at the schema level. Architectural path is CCTP V2 → Base Sepolia → offramp. |
+| Await the pipeline in the webhook, don't detach (Jul 20) | Fire-and-forget assumed a long-lived server. Serverless freezes the execution context the moment the response returns, so the detached `runPipeline` was killed mid-flight — inbound events were recorded but never classified, routed, or executed. Same applied to `swapSavingsHalf`. A slow 200 is correct here; a fast 200 that did nothing is not. |
+| `force-dynamic` on the dashboard (Jul 20) | With no `dynamic` or `revalidate` export, Next statically rendered the page at build time, so it served a snapshot of the database as of the last deploy. The failure shape was the dangerous kind: correct immediately after every deploy, silently stale afterward. |
+| Drop the API key IP allowlist for testnet (Jul 20) | Serverless functions egress from rotating cloud IPs, so an IP-restricted key can never authenticate from the deployment — webhook signature verification failed on every delivery. Accepted for a testnet key; mainnet should use a separate, scoped key for the deployed environment rather than an unrestricted one. |
 
 ---
 
@@ -281,7 +284,7 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 - **Setup scripts:** `docs-planning/setup/` (Circle wallet bootstrap reference)
 - **Notes:** `notes/` (research findings during planning phase)
 - **Tithe v0:** https://github.com/Hudgins333/Tithe (deployed at `0x7eB4b1Abb96d6ed089c48219dC3df18d2B7aEf4F`)
-- **Storehouse repo:** https://github.com/Hudgins333/storehouse (this repo)
+- **Storehouse repo:** https://github.com/Hudgins333/MyStorehouse (this repo — de-forked from arc-commerce July 20, 2026; the original fork remains at `Hudgins333/Storehouse`)
 - **Ignyte challenge:** https://app.ignyte.ae/public/challenges/4B436318-C737-F111-9A49-6045BD14D400
 
 ## Pre-Production Hardening (deferred — must close before real customers)
