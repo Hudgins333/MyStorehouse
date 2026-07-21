@@ -171,6 +171,18 @@ function relativeTime(iso: string): string {
     return new Date(iso).toLocaleDateString();
 }
 
+/**
+ * Human-readable transfer statuses. 'pending_offramp' means the agent
+ * allocated to a fiat obligation and recorded it, but the offramp adapter
+ * is not yet wired — the leg is waiting on a rail, not failed.
+ */
+function statusLabel(status: string): string {
+    const labels: Record<string, string> = {
+        pending_offramp: "awaiting fiat rail",
+    };
+    return labels[status] ?? status;
+}
+
 function classificationBadgeVariant(
     c: string | null
 ): "default" | "secondary" | "outline" {
@@ -274,7 +286,7 @@ export async function RecentActivity() {
                               {parseFloat(t.amount).toFixed(2)}
                             </span>
                                                         <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                              {t.status}
+                              {statusLabel(t.status)}
                             </span>
                                                     </div>
                                                 ))}
