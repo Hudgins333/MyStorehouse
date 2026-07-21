@@ -185,3 +185,72 @@ against cirBTC would only discover it at swap time.
 `scripts/swap-probe.ts` in this repo runs `estimateSwap` for a configurable
 `tokenOut` on Arc Testnet via a Circle-wallets adapter. Set tokenOut to "cirBTC"
 to reproduce the 331001; "EURC" returns a valid quote.
+## Webhook connection test cannot pass an endpoint that verifies signatures
+
+**Date:** July 20, 2026
+**Environment:** Circle Console → Webhooks (Testnet), Next.js route handler on Netlify
+
+### What happened
+
+Registering a webhook subscription runs a connection test against the endpoint.
+That test request arrives **unsigned** — no `x-circle-signature`, no
+`x-circle-key-id`. An endpoint that verifies signatures correctly rejects it,
+and Circle reports the subscription as failed.
+
+The result is that implementing signature verification *properly* is what
+prevents the subscription from activating. The only way through is to
+special-case unsigned requests with a 200 while still verifying anything that
+does carry a signature.
+
+### Why it matters
+
+The documented guidance is to verify signatures on every webhook. Following
+that guidance breaks registration. A developer hits an opaque "NON 2XX / 403"
+in the console with nothing indicating the probe was unsigned.
+
+### Suggested improvements
+
+- Sign the connection test with the same key used for real notifications, so a
+  correct implementation passes unchanged.
+- Failing that, document that the connection test is unsigned and show the
+  expected handling.
+
+---
+
+## Webhook connection test does not tolerate serverless cold starts
+
+**Date:** July 20, 2026
+**Environment:** Circle Console → Webhooks (Testnet), Next.js route handler on Netlify Functions
+
+### What happened
+
+With the unsigned-probe case handled, the connection test still failed —
+sometimes as `403`, once as *"We were not able to make a connection to the URL
+specified, and received undefined."*
+
+Function logs showed the request arriving, the signature verifying, and the
+handler returning 200 on every attempt. The endpoint was working; Circle was
+not seeing the response in time.
+
+Measured round trips on the same endpoint:
+
+- cold invocation: **~6.1s**
+- warm invocation: **~0.33s**
+
+Warming the endpoint with a request immediately before running the connection
+test made it pass on the first try, and the subscription activated.
+
+### Why it matters
+
+Serverless is a common deployment target, and a cold start of several seconds
+is normal — especially for a handler that must fetch Circle's public key over
+the network before it can verify anything. The console reports this as an
+endpoint failure, which sends developers debugging code that is already
+correct. The two distinct error messages for what appears to be the same
+timeout make it harder still.
+
+### Suggested improvements
+
+- Allow a longer timeout on the connection test, or retry once before failing.
+- Surface the actual failure reason (timeout vs. non-2xx vs. connection
+  refused) rather than collapsing them.
