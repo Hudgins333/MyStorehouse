@@ -12,6 +12,11 @@ import { MainWalletCard } from "./_dashboard/main-wallet-card";
 import { ObligationsSection } from "./_dashboard/obligations-section";
 import { RecentActivity } from "./_dashboard/recent-activity";
 
+// Rendered per request. Without this, Next statically renders at build time
+// and the dashboard serves a snapshot of whatever the database held when the
+// site was built — balances and activity go stale until the next deploy.
+export const dynamic = "force-dynamic";
+
 function SectionLoading({ label }: { label: string }) {
   return (
     <div className="text-sm text-muted-foreground py-8 text-center">
