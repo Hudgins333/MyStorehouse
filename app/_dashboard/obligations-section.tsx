@@ -77,6 +77,28 @@ async function loadObligationsWithBuckets(): Promise<ObligationWithBucket[]> {
     }));
 }
 
+/**
+ * Amounts the agent allocated to fiat obligations but has not moved, because
+ * the offramp adapter is not yet wired. These sit in storehouse-main rather
+ * than in a bucket, so they never appear in current_balance — without this the
+ * dashboard would show $0.00 routed while the activity feed shows the leg.
+ */
+async function loadPendingOfframpByObligation(): Promise<Record<string, number>> {
+    const { data, error } = await supabaseAdminClient
+        .from("transfers")
+        .select("obligation_id, amount")
+        .eq("status", "pending_offramp");
+
+    if (error || !data) {
+        return {};
+    }
+
+    return data.reduce<Record<string, number>>((acc, row: any) => {
+        acc[row.obligation_id] = (acc[row.obligation_id] ?? 0) + parseFloat(row.amount);
+        return acc;
+    }, {});
+}
+
 async function loadSavingsSwapSummary(): Promise<SavingsSwapSummary> {
     const { data, error } = await supabaseAdminClient
         .from("swaps")
@@ -126,9 +148,10 @@ function formatAmount(n: number): string {
 }
 
 export async function ObligationsSection() {
-    const [obligations, savingsSwaps] = await Promise.all([
+    const [obligations, savingsSwaps, pendingOfframp] = await Promise.all([
         loadObligationsWithBuckets(),
         loadSavingsSwapSummary(),
+        loadPendingOfframpByObligation(),
     ]);
 
     return (
@@ -186,6 +209,11 @@ export async function ObligationsSection() {
                                         </TableCell>
                                         <TableCell className="text-right font-mono">
                                             <div>${formatBucketBalance(o.current_balance)}</div>
+                                            {(pendingOfframp[o.id] ?? 0) > 0 && (
+                                                <div className="text-xs text-muted-foreground mt-0.5">
+                                                    + {formatAmount(pendingOfframp[o.id])} awaiting fiat rail
+                                                </div>
+                                            )}
                                             {isSavings && (
                                                 <div className="text-xs text-muted-foreground mt-0.5">
                                                     ↳ {formatAmount(Math.max(liquidUsdc, 0))} USDC ·{" "}
