@@ -325,12 +325,16 @@ async function handleOutboundConfirmation(
         .single();
 
     if (transferRow) {
-      swapSavingsHalf(transferRow).catch((e) => {
+      // Awaited for the same reason as the pipeline above — a detached promise
+      // does not survive the serverless response.
+      try {
+        await swapSavingsHalf(transferRow);
+      } catch (e) {
         console.error(
             `Savings swap crashed for ${circleTxId.slice(0, 8)}...:`,
             e instanceof Error ? e.message : String(e)
         );
-      });
+      }
     }
   } else {
     console.log(
@@ -402,16 +406,19 @@ export async function POST(req: NextRequest) {
     ) {
       const newEventId = await handleInboundTransfer(notification);
 
-      // Fire-and-forget: kick off classify -> route -> execute without blocking
-      // the 200. Circle needs a fast ack; the pipeline runs detached and never
-      // throws. We intentionally do NOT await this.
+      // Awaited deliberately. On serverless the execution context is frozen
+      // once the response returns, so a detached promise is killed mid-flight
+      // and the pipeline silently never runs. A slow 200 is correct here; a
+      // fast 200 that did nothing is not.
       if (newEventId) {
-        runPipeline(newEventId).catch((e) => {
+        try {
+          await runPipeline(newEventId);
+        } catch (e) {
           console.error(
               `Pipeline crashed for ${newEventId}:`,
               e instanceof Error ? e.message : String(e)
           );
-        });
+        }
       }
     }
 
