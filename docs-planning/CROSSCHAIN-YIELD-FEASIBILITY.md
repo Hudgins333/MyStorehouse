@@ -233,3 +233,98 @@ Fuji did not (bridged Circle-USDC stranded). Base is the v1 yield chain.
 To Christ be the Glory."
 git push origin master
 ```
+
+---
+
+## Addendum — July 21, 2026: aggressive lane validated end to end
+
+The open item in §8 ("aggressive-LP execution test") is now closed. A funded
+Base Sepolia wallet completed the full Uniswap V3 round-trip: swap into the
+pair, mint a concentrated-liquidity position, decrease liquidity, collect, and
+burn the position NFT. Capital returned essentially whole.
+
+**All three risk tiers are now proven on Base Sepolia:**
+
+| Tier | Path | Status |
+|---|---|---|
+| Conservative | USDC → Aave V3 lending | proven (read-only probe) |
+| Moderate | USDC → WETH → Aave V3 | proven (read-only probe) |
+| Aggressive | USDC → WETH → Uniswap V3 LP | **proven end to end (executed)** |
+
+### What was executed
+
+Test wallet funded from faucets: Base Sepolia ETH (gas) and Circle USDC.
+WETH was obtained by swapping USDC rather than wrapping ETH — ETH was the
+scarce asset (one faucet drop per day), USDC was not.
+
+1. **Swap** — 5 USDC to 0.00283 WETH via SwapRouter02
+   `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`. Quoted all four fee tiers and
+   routed through the best (0.30%). Testnet quotes still vary ~3x across tiers;
+   the mechanism is what matters, not the rate.
+2. **Mint** — position opened in the 0.30% USDC/WETH pool
+   `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad`, range ±50 tick spacings around
+   the current tick. The pool consumed 3.544379 USDC and 0.002 WETH, returning
+   **tokenId 81492**.
+3. **decreaseLiquidity**, then **collect**, then **burn**, in that order.
+
+Accounting: 15.000000 USDC in, 14.999999 out (one unit of rounding dust); WETH
+returned to within 1 wei. Total gas across the whole sequence, swap included,
+was roughly 0.0000056 ETH.
+
+### Finding — the documented position manager address is wrong for Base Sepolia
+
+Uniswap's Base deployments page lists `NonfungiblePositionManager` as
+`0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`. **That address has no contract on
+Base Sepolia** — it is the Base mainnet deployment; the table's Sepolia column
+did not carry through.
+
+The live Base Sepolia position manager is
+**`0x27F971cb582BF9E50F397e4d29a5C7A34f11faA2`**, confirmed on-chain rather than
+from documentation: its `factory()` returns the Base Sepolia UniswapV3Factory
+`0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24` and its `WETH9()` returns canonical
+WETH. This is the same class of trap as the Aerodrome addresses in §3 — a
+documented address that is real on one network and empty on another. Verifying a
+contract's `factory()` against a known-good factory is a cheap, reliable check
+and belongs before any state-changing call.
+
+### Operational note — use a dedicated RPC for multi-step sequences
+
+The public `https://sepolia.base.org` endpoint served stale state repeatedly
+during this session, and the failure mode is misleading rather than obvious:
+
+- Two transactions failed pre-flight with `STF` (Uniswap's `safeTransferFrom`
+  failure) because `eth_estimateGas` simulated against a node that had not yet
+  seen the approval block. The allowance was set; the simulation could not see
+  it. Both succeeded unchanged on a retry.
+- `collect` was mined and **reverted on-chain** for the same reason: gas was
+  estimated against pre-`decreaseLiquidity` state, where `tokensOwed` was still
+  zero and the cheaper code path applied. It hit the limit executing the real one.
+- Balance reads immediately after a confirmed transaction returned the previous
+  block's values, unchanged to the last digit.
+
+None of these were contract or logic errors. For any sequence where one
+transaction's result feeds the next, use a dedicated RPC (Alchemy/Infura); on the
+public endpoint, expect phantom reverts and re-run before debugging.
+
+### What this means for v1
+
+The forced two-lane design in §7 is fully validated:
+
+- **Conservative lane, Base, Aave lending.** Proven, principal-stable,
+  instant-withdrawable, tax-escrow-safe.
+- **Aggressive lane, Base, Uniswap V3 USDC/WETH LP.** Proven executable,
+  token-clean (Circle USDC throughout), liquid, and reversible.
+
+Remaining work on this lane is integration, not validation: driving these calls
+from Storehouse's executor with Circle DCW signing rather than a local EOA, and
+wiring the movement rail (CCTP/Gateway) that gets USDC from Arc to Base. Both are
+distinct sessions. Concentrated-liquidity range selection also remains a real
+design decision — this test used a wide range around the current tick, which is
+the safe default but not necessarily the right strategy.
+
+Execution artifacts added:
+
+- `scripts/base-wallet-balance.ts` — ETH, USDC and WETH on the test wallet
+- `scripts/base-swap-usdc-weth.ts` — quote all fee tiers, route the best, swap
+- `scripts/base-lp-add.ts` — mint a position, print the tokenId
+- `scripts/base-lp-remove.ts` — decreaseLiquidity, collect, burn
