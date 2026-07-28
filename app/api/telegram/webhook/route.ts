@@ -14,6 +14,7 @@
  * See SPEC-telegram-addendum.md §11.5–11.7.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { handleOnboardingMessage } from "@/lib/onboarding/session";
 
 export const dynamic = "force-dynamic";
 
@@ -68,12 +69,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
-  // 3. Dedup: Telegram redelivers on non-200. Skip updates we've already seen.
-  //    (Handler wiring added next; for now we prove the gate + echo.)
+  // 3. Hand off to the onboarding conversation handler. It manages session
+  //    state, dedups by update_id, and returns the reply text (or "" to send
+  //    nothing, e.g. a duplicate redelivery).
   console.log(`Telegram: authorized update ${updateId} from ${fromId}: ${text.slice(0, 80)}`);
 
-  // TEMPORARY: echo, to prove the pipe end to end. Replaced by the bot handler.
-  await sendMessage(chatId, `Storehouse onboarding is almost ready. You said: "${text}"`);
+  try {
+    const reply = await handleOnboardingMessage(Number(fromId), text, Number(updateId));
+    if (reply) await sendMessage(chatId, reply);
+  } catch (e) {
+    console.error("onboarding handler error:", e instanceof Error ? e.message : String(e));
+    await sendMessage(chatId, "Something went wrong on my end. Please try that again.");
+  }
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }
