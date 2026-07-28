@@ -78,5 +78,9 @@ export interface ValidationResult {
 // Constants
 // ---------------------------------------------------------------------------
 
-export const CLAUDE_SONNET_MODEL = "claude-sonnet-4-6";
-export const CLAUDE_HAIKU_MODEL = "claude-haiku-4-5-20251001";
+export const CLAUDE_SONNET_MODEL = "claude-sonnet-5";
+// Storehouse runs Sonnet across all agents: the routing brain's plain-English
+// explanations are a demo-facing product surface, and Sonnet's reasoning is
+// worth the (still trivial) per-decision cost. CLAUDE_HAIKU_MODEL is retained
+// as a name so classifier/router imports are unchanged, but points at Sonnet 5.
+export const CLAUDE_HAIKU_MODEL = CLAUDE_SONNET_MODEL;
