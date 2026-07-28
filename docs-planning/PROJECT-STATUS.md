@@ -274,6 +274,8 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 | Await the pipeline in the webhook, don't detach (Jul 20) | Fire-and-forget assumed a long-lived server. Serverless freezes the execution context the moment the response returns, so the detached `runPipeline` was killed mid-flight — inbound events were recorded but never classified, routed, or executed. Same applied to `swapSavingsHalf`. A slow 200 is correct here; a fast 200 that did nothing is not. |
 | `force-dynamic` on the dashboard (Jul 20) | With no `dynamic` or `revalidate` export, Next statically rendered the page at build time, so it served a snapshot of the database as of the last deploy. The failure shape was the dangerous kind: correct immediately after every deploy, silently stale afterward. |
 | Drop the API key IP allowlist for testnet (Jul 20) | Serverless functions egress from rotating cloud IPs, so an IP-restricted key can never authenticate from the deployment — webhook signature verification failed on every delivery. Accepted for a testnet key; mainnet should use a separate, scoped key for the deployed environment rather than an unrestricted one. |
+| Sonnet across all agents (Jul 28) | Moved the classifier and router off Haiku to `claude-sonnet-5`. The plain-English routing explanations are a demo-facing product surface and Sonnet's reasoning is worth the trivial per-decision cost. `CLAUDE_HAIKU_MODEL` kept as an alias so agent imports are unchanged. |
+| Telegram onboarding: LLM proposes, code validates (Jul 28) | Conversational obligation intake built on the same safety model as routing. Sonnet extracts structured obligations from natural language; deterministic code validates every field (percentage→decimal, real due days, no name collisions, percentages ≤100%) before anything reaches the obligations table. Intent detection (yes/done/start over) is regex, not LLM-judged, so the commit trigger can't be hallucinated. Single authorized user; new obligations append by priority and default to the operating wallet with destinations set later. |
 
 ---
 
@@ -287,6 +289,31 @@ Most Track 4 submissions will be variations on "AI agent buys API calls with Nan
 - **Storehouse repo:** https://github.com/Hudgins333/MyStorehouse (this repo — de-forked from arc-commerce July 20, 2026; the original fork remains at `Hudgins333/Storehouse`)
 - **Ignyte challenge:** https://app.ignyte.ae/public/challenges/4B436318-C737-F111-9A49-6045BD14D400
 
+## Onboarding Surface — Roadmap
+
+The Telegram bot is a deliberately bounded **single-user demo surface** for
+obligation intake (SPEC §11): conversational capture → Sonnet extraction →
+deterministic validation → commit to `obligations`. It is not the product's
+final form; it is the thinnest thing that proves the cognition layer is legible.
+
+**Next step — risk-appetite pass (in progress).** The session state machine
+already reserves a `risk` state. This pass adds per-bucket risk-appetite
+elicitation and, critically, the **cautionary-statement consent flow** that
+gates the higher-risk routing tiers. The aggressive lane (USDC→WETH→Uniswap
+V3 LP) is validated end to end but must not route real funds for a bucket until
+the user has acknowledged a path-specific caution (e.g. impermanent loss),
+generated for readability and validated against a vetted risk template. This is
+the product differentiator and the ethical gate on the DeFi tiers.
+
+**North star — full conversational app on the website (post-hackathon).** The
+long-term vision is a full conversational interface on mystorehouse.ai — not
+just intake but ongoing interaction — that guides a crypto-naive user through
+everything, *including provisioning wallets behind the scenes*. This is
+explicitly deferred: provisioning wallets and holding funds for arbitrary users
+crosses into money-transmitter / custody territory and is gated on the MSB
+analysis noted below. v1 stays single-user with the existing wallets. The
+Telegram surface is the seed; the website app is the tree.
+
 ## Pre-Production Hardening (deferred — must close before real customers)
 
 These are acceptable on single-user testnet but are blockers for any multi-user
@@ -298,6 +325,11 @@ or mainnet deployment:
   tables (e.g. `swaps`, `transfers`, `income_events`). Before multi-user:
   enable RLS on all tables and add per-user access policies. v1 tables were
   created service-key-only with RLS deferred for testnet speed.
+- **Per-user wallet provisioning is MSB/custody territory.** The north-star
+  onboarding flow (provisioning wallets for crypto-naive users, holding funds on
+  their behalf) is a money-transmitter question. v1 avoids it entirely by staying
+  single-user on existing wallets. Any multi-user launch requires securities/MSB
+  counsel before provisioning or custodying user funds.
 - *(add future pre-prod items here)*
 --
 
