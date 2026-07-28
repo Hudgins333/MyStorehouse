@@ -42,11 +42,20 @@ export const TIER_PROFILES: Record<RiskTier, TierProfile> = {
     requiredPoints: [
       {
         description: "Value moves with ETH's price — it can go down.",
-        anyOf: ["price of eth", "eth's price", "eth price", "value can fall", "value can go down", "lose value", "drop in value", "market moves"],
+        anyOf: [
+          "price of eth", "eth's price", "eth price", "value can fall",
+          "value can go down", "lose value", "drop in value", "market moves",
+          "rise and fall", "move with eth", "moves with eth", "goes down",
+          "can go down", "fall with", "swing",
+        ],
       },
       {
         description: "This is not principal-stable like the safe option.",
-        anyOf: ["not guaranteed", "principal", "unlike the safe", "not stable", "no guarantee", "can lose"],
+        anyOf: [
+          "not guaranteed", "principal", "unlike the safe", "not stable",
+          "no guarantee", "can lose", "isn't stable", "not principal",
+          "balance", "won't stay", "not the safe", "market risk",
+        ],
       },
     ],
   },
@@ -64,11 +73,21 @@ export const TIER_PROFILES: Record<RiskTier, TierProfile> = {
       },
       {
         description: "You can end up with less than you put in.",
-        anyOf: ["less than you put in", "less than you deposited", "lose part of", "lose some of", "below what you", "principal", "lose money"],
+        anyOf: [
+          "less than you put in", "less than you deposited", "less than you started",
+          "less than you originally", "less value than", "less money than",
+          "lose part of", "lose some of", "below what you", "principal",
+          "lose money", "shrink", "end up with less", "withdraw is less",
+          "come out with less", "get back less",
+        ],
       },
       {
         description: "Returns are not guaranteed.",
-        anyOf: ["not guaranteed", "no guarantee", "may not", "isn't guaranteed", "cannot promise"],
+        anyOf: [
+          "not guaranteed", "no guarantee", "no guaranteed", "aren't guaranteed",
+          "isn't guaranteed", "not a guarantee", "may not", "cannot promise",
+          "not a sure thing", "not a sure", "nothing guaranteed",
+        ],
       },
     ],
   },
