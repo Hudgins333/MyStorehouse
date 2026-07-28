@@ -101,9 +101,26 @@ function reviewSummary(obligations: ValidatedObligation[]): string {
   );
 }
 
-/** Commit staged obligations to the obligations table, appending by priority. */
-async function commitObligations(obligations: ValidatedObligation[]): Promise<number> {
-  if (obligations.length === 0) return 0;
+/**
+ * Commit staged obligations to the obligations table, appending by priority.
+ * Skips any whose name already exists (the table has a unique name constraint);
+ * returns how many were inserted and which names were skipped.
+ */
+async function commitObligations(
+  obligations: ValidatedObligation[]
+): Promise<{ inserted: number; skipped: string[] }> {
+  if (obligations.length === 0) return { inserted: 0, skipped: [] };
+
+  // Filter out names that already exist — the table enforces unique names.
+  const { data: existing } = await supabase.from("obligations").select("name");
+  const existingNames = new Set((existing ?? []).map((r: any) => String(r.name).toLowerCase()));
+
+  const toInsert = obligations.filter((o) => !existingNames.has(o.name.toLowerCase()));
+  const skipped = obligations
+    .filter((o) => existingNames.has(o.name.toLowerCase()))
+    .map((o) => o.name);
+
+  if (toInsert.length === 0) return { inserted: 0, skipped };
 
   const { data: maxRow } = await supabase
     .from("obligations")
@@ -114,7 +131,7 @@ async function commitObligations(obligations: ValidatedObligation[]): Promise<nu
 
   let priority = (maxRow?.priority ?? 0) + 1;
 
-  const rows = obligations.map((o) => ({
+  const rows = toInsert.map((o) => ({
     name: o.name,
     type: o.type,
     amount: o.amount,
@@ -130,7 +147,7 @@ async function commitObligations(obligations: ValidatedObligation[]): Promise<nu
 
   const { error } = await supabase.from("obligations").insert(rows);
   if (error) throw new Error(`commit failed: ${error.message}`);
-  return rows.length;
+  return { inserted: rows.length, skipped };
 }
 
 /**
@@ -162,9 +179,16 @@ export async function handleOnboardingMessage(
   if (session.state === "confirming") {
     if (YES_WORDS.test(trimmed)) {
       try {
-        const n = await commitObligations(staged);
+        const { inserted, skipped } = await commitObligations(staged);
         await saveSession(session.id, { state: "complete", last_update_id: updateId, completed_at: new Date().toISOString() });
-        return `Saved ${n} obligation${n === 1 ? "" : "s"}. Storehouse will use these to route your income. To Christ be the Glory.`;
+        let msg = inserted > 0
+          ? `Saved ${inserted} obligation${inserted === 1 ? "" : "s"}. Storehouse will use these to route your income.`
+          : "Nothing new to save —";
+        if (skipped.length) {
+          msg += ` ${inserted > 0 ? "Skipped" : "you already have"} ${skipped.join(", ")} (already set up).`;
+        }
+        msg += " To Christ be the Glory.";
+        return msg;
       } catch (e) {
         await saveSession(session.id, { last_update_id: updateId });
         return `Something went wrong saving those: ${e instanceof Error ? e.message : "unknown error"}. Your list is still here — say "yes" to try again.`;
