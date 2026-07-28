@@ -343,6 +343,15 @@ or mainnet deployment:
   which are due (or overdue) are funded deterministically up to target BEFORE the
   model gets discretion over the flexible remainder. Immediate cause (missing
   due_date) is fixed; the architectural hardening is the real item.
+  Concrete example (Jul 28, after due_date set): the model reasoned soundly but
+  landed differently across runs — one funded Car Payment as pending_offramp,
+  another held the remainder in Operating because Car Payment's destination is
+  still the OFFRAMP_DESTINATION_PENDING_PARTNER_DECISION placeholder ("due in 8
+  days and normally urgent... but no confirmed offramp destination, so funds
+  cannot be routed there yet"). Airtight reasoning, but a household's car payment
+  can't depend on which valid judgment the model lands on. Note the coupling: the
+  off-ramp gap and the routing instability are the same root problem — Car Payment
+  needs (a) a real destination and (b) code-enforced funding.
 - *(add future pre-prod items here)*
 --
 
