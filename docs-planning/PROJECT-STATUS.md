@@ -334,6 +334,15 @@ or mainnet deployment:
   their behalf) is a money-transmitter question. v1 avoids it entirely by staying
   single-user on existing wallets. Any multi-user launch requires securities/MSB
   counsel before provisioning or custodying user funds.
+- **Fixed/due obligations should be code-enforced, not model-discretionary.**
+  Surfaced by the autonomous deposit test (Jul 28): with Car Payment's due_date
+  null, Sonnet routed the remainder to Operating one run and to the Car Payment
+  another — sound reasoning from the data ("no due date, no urgency"), but a due
+  fixed obligation shouldn't depend on how the model leans on a given run. The
+  LLM-proposes/code-validates model should be extended so that fixed obligations
+  which are due (or overdue) are funded deterministically up to target BEFORE the
+  model gets discretion over the flexible remainder. Immediate cause (missing
+  due_date) is fixed; the architectural hardening is the real item.
 - *(add future pre-prod items here)*
 --
 
