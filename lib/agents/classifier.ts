@@ -226,14 +226,16 @@ export async function classifyIncomeEvent(
     ],
   });
 
-  const firstBlock = response.content[0];
-  if (firstBlock.type !== "text") {
+  // Sonnet 5 may return thinking blocks before the text block, so find the
+  // text block rather than assuming it is content[0].
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
     throw new Error(
-      `Unexpected response block type from Claude: ${firstBlock.type}`
+      `No text block in Claude response (types: ${response.content.map((b) => b.type).join(", ")})`
     );
   }
 
-  const result = parseAndValidate(firstBlock.text);
+  const result = parseAndValidate(textBlock.text);
 
   // Write back to the database
   const { error } = await supabaseAdminClient

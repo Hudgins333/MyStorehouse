@@ -323,14 +323,18 @@ export async function routeIncomeEvent(
       ],
     });
 
-    const firstBlock = response.content[0];
-    if (firstBlock.type !== "text") {
-      throw new Error(`Unexpected Claude block type: ${firstBlock.type}`);
+    // Sonnet 5 may return thinking blocks before the text block, so find the
+    // text block rather than assuming it is content[0].
+    const textBlock = response.content.find((b) => b.type === "text");
+    if (!textBlock || textBlock.type !== "text") {
+      throw new Error(
+        `No text block in Claude response (types: ${response.content.map((b) => b.type).join(", ")})`
+      );
     }
 
     let plan: RoutingPlan;
     try {
-      plan = parsePlan(firstBlock.text);
+      plan = parsePlan(textBlock.text);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn(`  attempt ${attempt}: parse failure — ${message}`);
