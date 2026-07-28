@@ -122,6 +122,29 @@ function reviewSummary(obligations: ValidatedObligation[]): string {
   );
 }
 
+// Convert a day-of-month (1-31) to the next occurrence as a YYYY-MM-DD date.
+// The obligations.due_date column is a DATE, but onboarding captures a
+// day-of-month; convert at the DB boundary. Clamps to the month's last day.
+function dayOfMonthToDate(day: number | null): string | null {
+  if (day === null || day === undefined) return null;
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth(); // 0-indexed
+  const daysInMonth = (yy: number, mm: number) => new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+  // This month first; if that day already passed, roll to next month.
+  let ty = y, tm = m;
+  const clampThis = Math.min(day, daysInMonth(ty, tm));
+  const candidate = new Date(Date.UTC(ty, tm, clampThis));
+  if (candidate < new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))) {
+    tm = m + 1;
+    if (tm > 11) { tm = 0; ty = y + 1; }
+  }
+  const clamped = Math.min(day, daysInMonth(ty, tm));
+  const mm = String(tm + 1).padStart(2, "0");
+  const dd = String(clamped).padStart(2, "0");
+  return `${ty}-${mm}-${dd}`;
+}
+
 /**
  * Commit staged obligations to the obligations table, appending by priority.
  * Skips any whose name already exists (the table has a unique name constraint);
@@ -159,7 +182,7 @@ async function commitObligations(
     destination_address: o.destination_address,
     destination_label: o.name,
     destination_type: o.destination_type,
-    due_date: o.due_date,
+    due_date: dayOfMonthToDate(o.due_date),
     due_recurrence: o.due_recurrence === "none" ? null : o.due_recurrence,
     priority: priority++,
     active: true,
