@@ -23,15 +23,21 @@ function missingPoints(text: string, tier: RiskTier): string[] {
     .map((pt) => pt.description);
 }
 
-/** Deterministic fallback caution, built straight from the template. */
+// Pre-written, complete cautions per consent tier. Used if the model is
+// unavailable or can't produce a validated caution. These are themselves
+// written to satisfy every required point, so the user always sees a real,
+// complete warning — never the validator's internal checklist.
+const FALLBACK_CAUTIONS: Record<string, (bucket: string) => string> = {
+  moderate: (bucket) =>
+    `Before I set "${bucket}" to Grow it carefully: this moves part of your money into ETH, so its value will rise and fall with ETH's price — it can genuinely go down. Unlike the safe option, your balance here is not guaranteed to stay stable. Reply "yes" if you're comfortable with that, or choose a safer option.`,
+  aggressive: (bucket) =>
+    `Before I set "${bucket}" to Grow it boldly: this converts part of your USDC to ETH and provides liquidity on Uniswap to earn trading fees. It exposes you to impermanent loss — if ETH's price moves a lot, you can end up with less than you put in. Returns are not guaranteed. Reply "yes" only if you're genuinely comfortable with that risk, or choose a safer option.`,
+};
+
+/** Deterministic fallback caution — real prose, satisfies all required points. */
 function fallbackCaution(tier: RiskTier, bucketName: string): string {
-  const p = tierProfile(tier);
-  const points = p.requiredPoints.map((pt) => `• ${pt.description}`).join("\n");
-  return (
-    `Before I set "${bucketName}" to ${p.label} (${p.lane}), here's what that means:\n\n` +
-    `${points}\n\n` +
-    `Only say yes if you're comfortable with that. Reply "yes" to confirm, or choose a safer option.`
-  );
+  const builder = FALLBACK_CAUTIONS[tier];
+  return builder ? builder(bucketName) : "";
 }
 
 const SYSTEM = `You write a short, warm, plain-language caution for someone choosing a risk level for part of their savings in a stewardship app.
