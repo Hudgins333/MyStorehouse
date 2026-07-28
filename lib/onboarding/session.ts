@@ -12,6 +12,8 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { extractObligations, type ValidatedObligation } from "./extract";
+import { generateCaution } from "./risk-caution";
+import { tierProfile, type RiskTier } from "./risk-template";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
@@ -20,12 +22,29 @@ const supabase = createClient(
 
 type SessionState = "idle" | "collecting" | "confirming" | "risk" | "complete";
 
+interface RiskProgress {
+  queue: string[];              // obligation ids still to ask about
+  currentId: string | null;     // bucket currently being asked
+  currentName: string | null;
+  pendingTier: RiskTier | null; // tier awaiting a yes/no consent
+  pendingCaution: string | null;// exact caution shown (logged verbatim on yes)
+}
+
 interface Session {
   id: string;
   telegram_user_id: number;
   state: SessionState;
   partial_obligations: ValidatedObligation[];
   last_update_id: number | null;
+  risk_progress: RiskProgress | null;
+}
+
+// A bucket is risk-eligible if it accumulates and holds value — savings-like.
+// Everything else (tax escrow, tithe, fixed bills, operating remainder) stays
+// conservative by design; this also enforces the tax-escrow liquidity rule at
+// the conversation layer, since escrow is never offered a riskier lane.
+function isRiskEligible(name: string): boolean {
+  return /sav|nest ?egg|invest|growth|rainy ?day|emergency/i.test(name);
 }
 
 // Intent keywords (kept deterministic; not LLM-judged).
@@ -52,6 +71,7 @@ async function getOrCreateSession(userId: number): Promise<Session> {
       state: data.state,
       partial_obligations: (data.partial_obligations as ValidatedObligation[]) ?? [],
       last_update_id: data.last_update_id,
+      risk_progress: (data.risk_progress as RiskProgress | null) ?? null,
     };
   }
 
@@ -68,12 +88,13 @@ async function getOrCreateSession(userId: number): Promise<Session> {
     state: created.state,
     partial_obligations: [],
     last_update_id: null,
+    risk_progress: null,
   };
 }
 
 async function saveSession(
   id: string,
-  patch: Partial<{ state: SessionState; partial_obligations: ValidatedObligation[]; last_update_id: number; completed_at: string }>
+  patch: Partial<{ state: SessionState; partial_obligations: ValidatedObligation[]; last_update_id: number; completed_at: string; risk_progress: RiskProgress | null }>
 ): Promise<void> {
   await supabase
     .from("onboarding_sessions")
@@ -150,6 +171,93 @@ async function commitObligations(
   return { inserted: rows.length, skipped };
 }
 
+// Set a bucket's risk tier, and (for consent tiers) log the exact caution shown.
+async function applyTier(
+  obligationId: string,
+  tier: RiskTier,
+  cautionText: string | null,
+  userId: number
+): Promise<void> {
+  await supabase.from("obligations").update({ risk_tier: tier }).eq("id", obligationId);
+  if (tier !== "conservative" && cautionText) {
+    await supabase.from("risk_consents").insert({
+      obligation_id: obligationId,
+      telegram_user_id: userId,
+      risk_tier: tier,
+      caution_text: cautionText,
+    });
+  }
+}
+
+// Prompt text offering the three blended choices for a bucket.
+function riskChoicePrompt(bucketName: string): string {
+  const safe = tierProfile("conservative");
+  const mod = tierProfile("moderate");
+  const agg = tierProfile("aggressive");
+  return (
+    `Now, how should Storehouse handle your "${bucketName}"?\n\n` +
+    `1. ${safe.label} — ${safe.oneLine}\n` +
+    `2. ${mod.label} — ${mod.oneLine}\n` +
+    `3. ${agg.label} — ${agg.oneLine}\n\n` +
+    `Reply 1, 2, or 3.`
+  );
+}
+
+// Build the risk queue from just-saved obligations; returns the first prompt
+// or null if no bucket is risk-eligible.
+async function beginRiskPhase(sessionId: string, updateId: number): Promise<string | null> {
+  const { data: obs } = await supabase
+    .from("obligations")
+    .select("id,name")
+    .order("priority");
+  const eligible = (obs ?? []).filter((o: any) => isRiskEligible(o.name));
+  if (eligible.length === 0) return null;
+
+  const queue = eligible.map((o: any) => o.id);
+  const first = eligible[0];
+  const progress: RiskProgress = {
+    queue: queue.slice(1),
+    currentId: first.id,
+    currentName: first.name,
+    pendingTier: null,
+    pendingCaution: null,
+  };
+  await saveSession(sessionId, { state: "risk", risk_progress: progress, last_update_id: updateId });
+  return riskChoicePrompt(first.name);
+}
+
+// Advance to the next bucket in the queue, or finish.
+async function nextRiskBucket(
+  sessionId: string,
+  progress: RiskProgress,
+  updateId: number,
+  preamble: string
+): Promise<string> {
+  if (progress.queue.length === 0) {
+    await saveSession(sessionId, {
+      state: "complete",
+      risk_progress: null,
+      last_update_id: updateId,
+      completed_at: new Date().toISOString(),
+    });
+    return preamble + "That's everything set up. Storehouse will steward it from here. To Christ be the Glory.";
+  }
+  const { data: next } = await supabase
+    .from("obligations")
+    .select("id,name")
+    .eq("id", progress.queue[0])
+    .single();
+  const newProgress: RiskProgress = {
+    queue: progress.queue.slice(1),
+    currentId: next!.id,
+    currentName: next!.name,
+    pendingTier: null,
+    pendingCaution: null,
+  };
+  await saveSession(sessionId, { risk_progress: newProgress, last_update_id: updateId });
+  return preamble + riskChoicePrompt(next!.name);
+}
+
 /**
  * Main entry: given a user id, their message, and the Telegram update id,
  * advance the conversation and return the bot's reply text.
@@ -175,20 +283,64 @@ export async function handleOnboardingMessage(
     return "Okay, cleared. Tell me your first obligation — for example, \"tithe 10%\" or \"rent $1200 on the 1st.\"";
   }
 
+  // ---- RISK: per-bucket tier selection + consent ----
+  if (session.state === "risk" && session.risk_progress) {
+    const rp = session.risk_progress;
+
+    // (a) A consent caution is pending — expect yes / no.
+    if (rp.pendingTier && rp.pendingCaution) {
+      if (YES_WORDS.test(trimmed)) {
+        await applyTier(rp.currentId!, rp.pendingTier, rp.pendingCaution, userId);
+        const label = tierProfile(rp.pendingTier).label;
+        return await nextRiskBucket(session.id, rp, updateId, `Set "${rp.currentName}" to ${label}. `);
+      }
+      if (NO_WORDS.test(trimmed)) {
+        // Back out to the choice for the same bucket.
+        const cleared: typeof rp = { ...rp, pendingTier: null, pendingCaution: null };
+        await saveSession(session.id, { risk_progress: cleared, last_update_id: updateId });
+        return "No problem. " + riskChoicePrompt(rp.currentName!);
+      }
+      return `Just to confirm "${rp.currentName}" as ${tierProfile(rp.pendingTier).label} — reply "yes" to proceed, or "no" to pick differently.`;
+    }
+
+    // (b) Expecting a tier choice: 1, 2, or 3.
+    const choice = trimmed.match(/^\s*([123])/)?.[1];
+    if (!choice) {
+      return "Please reply 1, 2, or 3.\n\n" + riskChoicePrompt(rp.currentName!);
+    }
+    const tier: RiskTier = choice === "1" ? "conservative" : choice === "2" ? "moderate" : "aggressive";
+
+    if (tier === "conservative") {
+      await applyTier(rp.currentId!, "conservative", null, userId);
+      return await nextRiskBucket(session.id, rp, updateId, `Set "${rp.currentName}" to Keep it safe. `);
+    }
+
+    // Consent tier: generate + show the validated caution, wait for yes.
+    const caution = await generateCaution(tier, rp.currentName!);
+    const pending: typeof rp = { ...rp, pendingTier: tier, pendingCaution: caution };
+    await saveSession(session.id, { risk_progress: pending, last_update_id: updateId });
+    return caution;
+  }
+
   // ---- CONFIRMING: waiting for yes/no on the review ----
   if (session.state === "confirming") {
     if (YES_WORDS.test(trimmed)) {
       try {
         const { inserted, skipped } = await commitObligations(staged);
-        await saveSession(session.id, { state: "complete", last_update_id: updateId, completed_at: new Date().toISOString() });
         let msg = inserted > 0
-          ? `Saved ${inserted} obligation${inserted === 1 ? "" : "s"}. Storehouse will use these to route your income.`
-          : "Nothing new to save —";
+          ? `Saved ${inserted} obligation${inserted === 1 ? "" : "s"}. `
+          : "Nothing new to save. ";
         if (skipped.length) {
-          msg += ` ${inserted > 0 ? "Skipped" : "you already have"} ${skipped.join(", ")} (already set up).`;
+          msg += `${inserted > 0 ? "Skipped" : "You already have"} ${skipped.join(", ")} (already set up). `;
         }
-        msg += " To Christ be the Glory.";
-        return msg;
+        // Move into the risk phase if any saved bucket is risk-eligible.
+        const riskPrompt = await beginRiskPhase(session.id, updateId);
+        if (riskPrompt) {
+          return msg + "\n\n" + riskPrompt;
+        }
+        // Nothing risk-eligible — complete now.
+        await saveSession(session.id, { state: "complete", last_update_id: updateId, completed_at: new Date().toISOString() });
+        return msg + "Storehouse will use these to route your income. To Christ be the Glory.";
       } catch (e) {
         await saveSession(session.id, { last_update_id: updateId });
         return `Something went wrong saving those: ${e instanceof Error ? e.message : "unknown error"}. Your list is still here — say "yes" to try again.`;
