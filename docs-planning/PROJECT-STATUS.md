@@ -357,3 +357,25 @@ or mainnet deployment:
 --
 
 Glory to King Jesus!
+
+## Phase-2 / Production Hardening: Bridge Custody Model
+
+The Arc→Base bridge destination adapter currently uses a raw private key
+(`BASE_TEST_PRIVATE_KEY`, a throwaway testnet EOA) via
+`createViemAdapterFromPrivateKey`. This is the ONLY place in the system that
+uses a local private key — everything else runs through Circle
+Developer-Controlled Wallets with no exposed keys.
+
+For the hackathon (testnet), this key is acceptable: it holds no real value,
+and it's required for the autonomous auto-deploy cron to bridge Arc→Base on
+Netlify. The key is set in Netlify env (Functions scope).
+
+FOR PRODUCTION: this must be replaced with a keyless/custodial approach —
+Circle-signed bridging or a DCW-based destination — so no private key exists
+in the deploy environment. Tracked as a deliberate, temporary testnet measure,
+not the final architecture.
+
+Related known item: onboarding now creates a bucket per obligation (fixed
+2026-08); auto-deploy idle-accounting assumes distinct per-bucket wallets, so
+a demo set that collapses buckets onto one wallet will over-count idle balance.
+Production uses distinct wallets per bucket.
