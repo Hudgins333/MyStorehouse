@@ -190,8 +190,42 @@ async function commitObligations(
     current_period_filled: 0,
   }));
 
-  const { error } = await supabase.from("obligations").insert(rows);
+  // Insert obligations and get their generated ids back so we can create
+  // a matching bucket for each. Every obligation needs a bucket — the routing
+  // executor credits buckets on confirmation, and confirm_transfer raises if
+  // an obligation has none. Creating the bucket here, at obligation creation,
+  // is the correct home for it (previously buckets were seeded out-of-band,
+  // which meant a fresh onboard produced obligations that could never be
+  // credited).
+  const { data: insertedRows, error } = await supabase
+    .from("obligations")
+    .insert(rows)
+    .select("id, name, destination_address");
   if (error) throw new Error(`commit failed: ${error.message}`);
+
+  // Create one bucket per newly-inserted obligation. Idempotent-ish: skip any
+  // obligation that somehow already has a bucket (unique constraint on
+  // obligation_id would reject a duplicate anyway).
+  if (insertedRows && insertedRows.length > 0) {
+    const { data: existingBuckets } = await supabase
+      .from("buckets")
+      .select("obligation_id")
+      .in("obligation_id", insertedRows.map((r: any) => r.id));
+    const haveBucket = new Set((existingBuckets ?? []).map((b: any) => b.obligation_id));
+    const bucketRows = insertedRows
+      .filter((r: any) => !haveBucket.has(r.id))
+      .map((r: any) => ({
+        name: r.name,
+        obligation_id: r.id,
+        wallet_address: r.destination_address,
+        current_balance: 0,
+      }));
+    if (bucketRows.length > 0) {
+      const { error: bucketErr } = await supabase.from("buckets").insert(bucketRows);
+      if (bucketErr) throw new Error(`bucket creation failed: ${bucketErr.message}`);
+    }
+  }
+
   return { inserted: rows.length, skipped };
 }
 
