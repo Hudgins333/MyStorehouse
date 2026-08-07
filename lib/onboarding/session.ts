@@ -52,6 +52,7 @@ const DONE_WORDS = /^\s*(done|finish|finished|that'?s all|that is all|complete|n
 const YES_WORDS = /^\s*(yes|yep|yeah|yup|correct|confirm|confirmed|looks good|save|do it|ok|okay)\s*$/i;
 const NO_WORDS = /^\s*(no|nope|wait|change|edit|not quite|incorrect)\s*$/i;
 const RESET_WORDS = /^\s*(start over|restart|reset|scratch that|never mind|nevermind)\s*$/i;
+const GREETING_WORDS = /^\s*(\/start|hi|hii|hey|hello|hiya|yo|how does this work|how do i (start|begin)|what is this|get started|start)\s*[!.?]*\s*$/i;
 
 /** Load the user's active session, or create a fresh idle one. */
 async function getOrCreateSession(userId: number): Promise<Session> {
@@ -299,6 +300,21 @@ export async function handleOnboardingMessage(
 
   const staged = session.partial_obligations;
   const trimmed = text.trim();
+
+  // Greeting / first contact — welcome the user before any onboarding.
+  // Only greet when nothing is staged yet, so a mid-flow "hi" doesn't reset.
+  if (GREETING_WORDS.test(trimmed) && staged.length === 0) {
+    await saveSession(session.id, { state: "collecting", last_update_id: updateId });
+    return (
+      "Welcome to Storehouse. \u{1F3DB}\uFE0F\n\n" +
+      "I help you steward your income \u2014 setting apart what matters before it can be spent.\n\n" +
+      "Just tell me your obligations, one at a time. For example:\n" +
+      "\u2022 \"tithe 10%\"\n" +
+      "\u2022 \"car payment $450 on the 5th\"\n" +
+      "\u2022 \"savings 15%\"\n\n" +
+      "When you're done, say \"done\" and I'll show you the plan. Let's begin \u2014 what's your first?"
+    );
+  }
 
   // Global: start over from any state.
   if (RESET_WORDS.test(trimmed)) {
