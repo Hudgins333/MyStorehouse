@@ -264,7 +264,7 @@ async function nextRiskBucket(
       last_update_id: updateId,
       completed_at: new Date().toISOString(),
     });
-    return preamble + "That's everything set up. Storehouse will steward it from here. To Christ be the Glory.";
+    return preamble + depositAddressLine();
   }
   const { data: next } = await supabase
     .from("obligations")
@@ -280,6 +280,18 @@ async function nextRiskBucket(
   };
   await saveSession(sessionId, { risk_progress: newProgress, last_update_id: updateId });
   return preamble + riskChoicePrompt(next!.name);
+}
+
+// Closing line: tell the user where to send income. Address from env so it's
+// always correct. This closes the onboarding loop — setup -> deposit address.
+function depositAddressLine(): string {
+  const addr = process.env.STOREHOUSE_MAIN_WALLET_ADDRESS || "";
+  if (!addr) return "You're all set. Storehouse will steward your income across these obligations.";
+  return (
+    "You're all set. \u{2705}\n\n" +
+    "Here's your Storehouse address \u2014 send your USDC here and I'll steward it across your obligations automatically:\n\n" +
+    "`" + addr + "`"
+  );
 }
 
 /**
@@ -309,9 +321,9 @@ export async function handleOnboardingMessage(
       "Welcome to Storehouse. \u{1F3DB}\uFE0F\n\n" +
       "I help you steward your income \u2014 setting apart what matters before it can be spent.\n\n" +
       "Just tell me your obligations, one at a time. For example:\n" +
-      "\u2022 \"tithe 10%\"\n" +
-      "\u2022 \"car payment $450 on the 5th\"\n" +
-      "\u2022 \"savings 15%\"\n\n" +
+      "\u2022 \"rent $1,200 on the 1st\"\n" +
+      "\u2022 \"set aside 20% for taxes\"\n" +
+      "\u2022 \"emergency fund 5%\"\n\n" +
       "When you're done, say \"done\" and I'll show you the plan. Let's begin \u2014 what's your first?"
     );
   }
@@ -379,7 +391,7 @@ export async function handleOnboardingMessage(
         }
         // Nothing risk-eligible — complete now.
         await saveSession(session.id, { state: "complete", last_update_id: updateId, completed_at: new Date().toISOString() });
-        return msg + "Storehouse will use these to route your income. To Christ be the Glory.";
+        return msg + "\n\n" + depositAddressLine();
       } catch (e) {
         await saveSession(session.id, { last_update_id: updateId });
         return `Something went wrong saving those: ${e instanceof Error ? e.message : "unknown error"}. Your list is still here — say "yes" to try again.`;
